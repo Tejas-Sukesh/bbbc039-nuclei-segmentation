@@ -7,13 +7,18 @@ against hand-annotated ground truth, on the 200-field
 **Headline result:** mean AP@[.5:.95] of **0.791** on the held-out test split
 (95% CI [0.766, 0.812]), 95.6% F1 at IoU 0.5.
 
-**The finding that matters more.** Over half of the remaining gap to a perfect
-score is not segmentation error at all. 54% of the total shortfall is spent at
-IoU 0.90 and 0.95, where "correct" means agreeing with a hand-drawn outline to
-within about half a pixel — and when the image itself is asked to arbitrate,
-**the model's outline is closer to the true nucleus edge than the human's is, on
-73% of 4,502 nuclei.** At the strict end, this metric is scoring the model
-against an annotation less accurate than the prediction being graded.
+**The finding that matters more.** 54% of the total shortfall is spent at IoU 0.90
+and 0.95, where "correct" means agreeing with a hand-drawn outline to within about
+half a pixel. At that scale the two outlines differ **systematically**: measured
+against the image's own intensity edge, **the model's boundary is the closer of
+the two on 73% of 4,502 nuclei**, with an independent gradient-based check
+agreeing at 79%.
+
+So a large part of the headline metric is arbitrating a sub-pixel difference in
+*where to place a boundary on a blurred edge* — a question of annotation
+convention — rather than whether the model found the right nucleus. That holds
+regardless of which outline one considers correct, and no amount of tuning
+reaches it. Section 1 states precisely what this does and does not license.
 
 Everything below was measured on this machine and is committed alongside the
 numbers in [`results/`](results/), so each figure quoted can be checked against
@@ -191,17 +196,32 @@ Both outlines trace slightly *tight* — inside the true edge — but the human
 traces tighter, by roughly a factor of two (Wilcoxon signed-rank
 p ≈ 4 × 10⁻³⁰², with the gradient-based check agreeing independently at 79%).
 
-**So more than half of the reported error is a ceiling, not a defect.** No amount
-of tuning, augmenting, or fine-tuning recovers it, because the target it is being
-scored against is itself further from the truth than the prediction. The
-practical consequence: on this dataset, AP at IoU ≥ 0.90 should be read as a
-noise floor, and F1@0.5 or AP@[.5:.75] is the informative range.
+**So a large part of the reported error is a ceiling, not a defect.** At the
+strict thresholds the metric is adjudicating a systematic sub-pixel difference in
+*where a boundary belongs on a blurred edge*, and no amount of tuning,
+augmenting, or fine-tuning reaches it. The practical consequence: on this
+dataset, AP at IoU ≥ 0.90 should be read as a noise floor, and F1@0.5 or
+AP@[.5:.75] is the informative range.
 
-What this does **not** establish is *why* the human outlines sit tighter —
-annotator imprecision and a genuine human/network disagreement about where a
-nucleus ends are not separable here. Nobody traced any nucleus in BBBC039 twice,
-so inter-annotator agreement, the direct measure of human precision, is not
-computable on this dataset at all.
+**Be precise about what this licenses.** The measurement is solid — paired, 4,502
+nuclei, two independent methods agreeing. The *interpretation* is narrower than it
+first appears, in three ways:
+
+- **Half-maximum is a convention, not ground truth.** It is the standard
+  sub-pixel definition for a blurred edge, but an annotator might trace tight
+  deliberately, to exclude a diffraction halo. So the defensible claim is "the
+  model's boundary agrees with the image's intensity edge more often," not "the
+  annotation is wrong."
+- **This says nothing about *why* the outlines differ.** Annotator imprecision
+  and a genuine human/network disagreement about where a nucleus ends are not
+  separable here, because nobody traced any nucleus in BBBC039 twice —
+  inter-annotator agreement, the direct measure of human precision, is not
+  computable on this dataset at all.
+- **It covers the easy population only.** Matched objects above 150 px with
+  adequate local contrast, excluding the field edge — 4,502 of 5,896 nuclei. It
+  deliberately excludes the small objects that dominate §2, whose boundary
+  statistics are unreliable. §1 and §2 are two separate findings that happen to
+  sit next to each other, not one.
 
 ### 2. What actually gets missed: one population of very small objects
 
@@ -541,6 +561,27 @@ the design reasoning in their docstrings is part of the record.
 
 ## Limitations
 
+- **Some of this dataset was plausibly in Cellpose's training data, so 0.791 is
+  not a clean held-out number.** The chain, from primary sources: the Cellpose-SAM
+  paper's dataset appendix states the *Cellpose nuclei dataset* it trains on
+  "consists of 1025 training images from various sources, with about half of the
+  images originating from the 2018 DataBowl competition." The 2018 Data Science
+  Bowl is BBBC038. And the [BBBC039 dataset page](https://bbbc.broadinstitute.org/BBBC039)
+  states that "a small fraction of the images in this dataset overlap with the
+  BBBC038 collection."
+
+  So an unknown but non-zero number of the 200 fields here — possibly including
+  test-split fields — may have been seen *with their labels* during training.
+  BBBC039 is never named in the paper; the exposure route is the DSB2018 overlap.
+  I did not quantify it, which would mean matching BBBC039 fields against the
+  BBBC038 image set. **Anyone comparing this 0.791 against a number from a model
+  that never saw BBBC038 is not making a fair comparison.**
+
+  What this does *not* touch: the failure analysis and the boundary measurement
+  are statements about *where the model and the annotation disagree*, and
+  contamination would if anything make the model agree with the annotation more,
+  not less. So the ceiling result survives — arguably it is strengthened, since
+  the systematic offset persists despite possible exposure to these labels.
 - **The test split shares imaging batches with training** (refutation #8), so
   0.791 measures across-field generalization within one experiment, not
   across-instrument or across-protocol transfer.

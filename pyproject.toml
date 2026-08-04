@@ -12,11 +12,14 @@ dependencies = [
     "matplotlib>=3.8",
     "pandas>=2.1",
     "tqdm>=4.66",
+    # The segmenter itself. Pulls torch transitively; on Apple Silicon the MPS
+    # backend comes with the default wheel, so no extra index is needed.
+    "cellpose>=4.0",
+    "torch>=2.2",
 ]
 
 [project.optional-dependencies]
-# Only needed if the deep-learning comparison in RESOURCES.md §4 gets built out.
-dl = ["torch>=2.2", "stardist>=0.9", "csbdeep>=0.7"]
+test = ["pytest>=8.0"]
 
 [build-system]
 requires = ["setuptools>=68"]
