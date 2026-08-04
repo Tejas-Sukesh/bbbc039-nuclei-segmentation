@@ -47,8 +47,17 @@
     "gt_grad_median": 0.27181252225517705,
     "pred_grad_median": 0.2819122510791082,
     "pred_sharper_fraction": 0.7883163038649489,
-    "wilcoxon_p_abs_error": 3.8495975443914835e-302,
-    "wilcoxon_p_gradient": 0.0
+    "per_image": {
+      "n_images": 49,
+      "gt_abs_error_median": 0.07734598979092366,
+      "pred_abs_error_median": 0.04411118194007871,
+      "pred_closer_fraction": 0.9795918367346939,
+      "pred_sharper_fraction": 0.9795918367346939,
+      "wilcoxon_p_abs_error": 7.105427357601002e-15,
+      "wilcoxon_p_gradient": 7.105427357601002e-15
+    },
+    "wilcoxon_p_abs_error_uncorrected": 3.8495975443914835e-302,
+    "wilcoxon_p_gradient_uncorrected": 0.0
   },
-  "annotation_ceiling_verdict": "the prediction sits closer to half-maximum on 73% of 4502 nuclei (median offset 0.045 vs 0.083 of local contrast, Wilcoxon p=3.85e-302)"
+  "annotation_ceiling_verdict": "the prediction sits closer to half-maximum on 73% of 4502 nuclei (median offset 0.045 vs 0.083 of local contrast). Aggregated per field, which is the level at which the observations are independent: 98% of 49 fields, Wilcoxon p=7.11e-15"
 }

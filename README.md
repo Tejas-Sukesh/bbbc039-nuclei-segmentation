@@ -11,8 +11,8 @@ against hand-annotated ground truth, on the 200-field
 and 0.95, where "correct" means agreeing with a hand-drawn outline to within about
 half a pixel. At that scale the two outlines differ **systematically**: measured
 against the image's own intensity edge, **the model's boundary is the closer of
-the two on 73% of 4,502 nuclei**, with an independent gradient-based check
-agreeing at 79%.
+the two in 48 of 49 fields**, with an independent gradient-based check agreeing in
+the same 48.
 
 So a large part of the headline metric is arbitrating a sub-pixel difference in
 *where to place a boundary on a blurred edge* — a question of annotation
@@ -30,7 +30,7 @@ the file that produced it.
 
 - [Quickstart](#quickstart) · [Results](#results) · [The optimization](#the-one-thing-optimized-deliberately)
 - [Where it fails](#where-it-fails) — the main section
-- [What I tested and refuted](#what-i-tested-and-refuted) — eight hypotheses, with numbers
+- [What I tested and refuted](#what-i-tested-and-refuted) — ten hypotheses, with numbers
 - [Approach](#approach) · [The dataset trap](#the-ground-truth-is-not-what-it-looks-like) · [Metric conventions](#metric-conventions)
 - [What I'd try next](#what-id-try-next) · [Limitations](#limitations)
 
@@ -119,7 +119,24 @@ overfitting: the test fields are slightly harder.
 
 ## The one thing optimized deliberately
 
-**FlowCache: 8.79 s → 0.109 s per parameter evaluation, an 81× speedup, with
+**First, the accuracy answer, because it is the one the brief is really asking
+for: I could not move it.** Six interventions, each chosen by measurement, are
+documented in [what I tested and refuted](#what-i-tested-and-refuted). The best of
+them is +0.0021 AP against a bootstrap interval of ±0.018 — the noise is nine
+times the effect, and `evaluate.compare()` prints a warning saying so rather than
+letting it be quoted as a win. Test-time augmentation, parameter tuning, adaptive
+search, input rescaling, and local normalisation are all honestly negative on the
+headline metric.
+
+One of them changed the *error profile* substantially even though the total did
+not move: 2× input rescaling cut merges from 103 to 69 and halved genuine
+two-nuclei fusions, trading them for more splits and false positives. That trade
+is only visible because splits and merges are counted separately, and it is the
+nearest thing here to an accuracy result.
+
+**What I can report as a measured, verified optimization is compute.**
+
+**FlowCache: 8.79 s → 0.109 s per parameter evaluation, a ~72× speedup, with
 bit-identical output.** Measured by
 [`scripts/08_flowcache_benchmark.py`](scripts/08_flowcache_benchmark.py), saved
 to [`results/flowcache_benchmark.json`](results/flowcache_benchmark.json).
@@ -149,14 +166,9 @@ to know:
 - **expensive**, requiring a network pass: `augment`, `normalize`, `diameter`,
   model choice, tiling
 
-**Why this is the optimization reported, and not an accuracy tweak.** Both
-accuracy levers were tried and both are honestly negative: the cheap parameters
-are already at their optimum in every direction tested, and test-time
-augmentation buys +0.0023 AP with overlapping confidence intervals — inside the
-noise, and `evaluate.compare()` says so in its own output rather than letting it
-be quoted as a win. Reporting an 81× measured, verified compute win is the honest
-answer; reporting a +0.002 AP change as "optimized" would not be. Both negatives
-are documented in [what I tested and refuted](#what-i-tested-and-refuted).
+One caveat on the number itself: the first of the three timed images includes
+loading the 1.2 GB checkpoint, so the mean-based 81× flatters it slightly. The
+median-based figure is **~72×**, which is the one I would quote.
 
 ## Where it fails
 
@@ -196,8 +208,16 @@ On 4,502 nuclei across 49 fields:
 | Sits on the steeper intensity gradient | 21% | **79%** |
 
 Both outlines trace slightly *tight* — inside the true edge — but the human
-traces tighter, by roughly a factor of two (Wilcoxon signed-rank
-p ≈ 4 × 10⁻³⁰², with the gradient-based check agreeing independently at 79%).
+traces tighter, by roughly a factor of two.
+
+**The significance test is done per field, not per object.** Nuclei within one
+image share focus, exposure and staining, so they are not independent
+observations, and a signed-rank test over 4,502 of them would overstate its
+p-value by many orders of magnitude. Reducing each field to its median offset and
+comparing those 49 paired values instead: **the model's outline is closer in 48 of
+49 fields**, Wilcoxon p ≈ 7 × 10⁻¹⁵, with the gradient check agreeing in the same
+48. Consistency across nearly every independent field is the more convincing
+statement anyway.
 
 **So a large part of the reported error is a ceiling, not a defect.** At the
 strict thresholds the metric is adjudicating a systematic sub-pixel difference in
@@ -207,9 +227,17 @@ dataset, AP at IoU ≥ 0.90 should be read as a noise floor, and F1@0.5 or
 AP@[.5:.75] is the informative range.
 
 **Be precise about what this licenses.** The measurement is solid — paired, 4,502
-nuclei, two independent methods agreeing. The *interpretation* is narrower than it
-first appears, in three ways:
+nuclei across 49 fields, two independent methods agreeing. The *interpretation* is
+narrower than it first appears, in four ways:
 
+- **The absolute direction is partly a sampling artifact; the comparison is not.**
+  Boundary pixels are sampled with `find_boundaries(mode="inner")`, i.e. the
+  outermost pixels *inside* each mask, which sits roughly half a pixel inside the
+  true contour — the same scale as the effect being measured. Both outlines are
+  sampled identically, so the paired result (the model is closer in 48 of 49
+  fields) is unaffected. But the claim that *both* outlines trace tight, in
+  absolute terms, is partly an artifact of where the sampling ring falls, and
+  should not be read as a physical finding about annotator behaviour.
 - **Half-maximum is a convention, not ground truth.** It is the standard
   sub-pixel definition for a blurred edge, but an annotator might trace tight
   deliberately, to exclude a diffraction halo. So the defensible claim is "the
@@ -485,6 +513,29 @@ The diagnosis was right and the mechanism was wrong: these objects are not faint
 sensor noise floor. Rebalancing contrast cannot create signal that was never
 recorded.
 
+**Worth noting why this finding isn't circular.** Cellpose's training targets are
+built by `dynamics.masks_to_flows`, which anchors each mask's diffusion at a
+*geometric* centre — `get_centers` takes the centre of mass of the **binary**
+mask, and the docstring specifies "the pixel closest to median within the mask."
+It never reads image intensity. So the vector field the network is trained to
+reproduce is defined entirely by the shape of the traced outline.
+
+That matters for how much weight the contrast gap carries. Had the targets been
+anchored on brightness peaks, "dim objects get missed" would be close to true by
+construction and would tell us nothing. They are anchored on geometry, so the
+15–25% gap is at least not an artifact of target construction.
+
+**Beyond that I am inferring.** A plausible reading is that the network learned to
+lean on intensity as one implicit cue among shape, edge sharpness and context —
+and that would be biologically reasonable here, since Hoechst binds DNA and
+chromatin is denser toward the nuclear interior than at the thin periphery, so
+nuclei in this stain often do carry an interior-peaked brightness gradient. But
+the Cellpose papers make no such claim about what the network relies on, and I
+have not found a source that establishes the mechanism. What the data supports is
+the correlation and the fact that it is not built into the targets. The causal
+story is a hypothesis, and testing it would need something like ablating contrast
+at fixed geometry.
+
 ## Approach
 
 Cellpose-SAM as the segmenter, a from-scratch classical pipeline as the
@@ -512,7 +563,7 @@ rather than of instance segmentation in general.
 
 **Why not just submit the four lines that call Cellpose?** That is the most
 literal possible instance of wiring together a library. The work here is the
-ground-truth decoding, the 81× cache that made parameter search affordable, and
+ground-truth decoding, the 72× cache that made parameter search affordable, and
 the failure attribution — none of which come out of the box.
 
 **Why no fine-tuning?** `cellpose.train.train_seg` exists and 100 labelled images
@@ -638,7 +689,7 @@ an obvious next step.
 src/nucleiseg/
   data.py         ground-truth decoding, split loading, dataset stats
   metrics.py      IoU matching, DSB AP sweep, splits/merges, bootstrap CIs
-  segmenters.py   unified interface + FlowCache (the 81x optimization)
+  segmenters.py   unified interface + FlowCache (the 72x optimization)
   baseline.py     classical pipeline: normalize -> Otsu -> EDT -> watershed
   boundary.py     half-maximum edge check -- the annotation-ceiling measurement
   failures.py     per-object error inventory: missed objects, merge composition
@@ -710,5 +761,5 @@ the design reasoning in their docstrings is part of the record.
   objects in §2, which are excluded by the area cut precisely because their
   boundary statistics are unreliable.
 - **Developed on Apple Silicon, MPS backend, no CUDA.** Timings are
-  machine-specific; the 81× ratio should hold in shape but not in absolute
+  machine-specific; the ~72× ratio should hold in shape but not in absolute
   numbers.

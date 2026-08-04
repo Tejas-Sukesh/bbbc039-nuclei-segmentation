@@ -183,7 +183,22 @@ def fit_image(
 
 
 def summarize(fits: list[BoundaryFit]) -> dict:
-    """Paired comparison of the two outlines, with a signed-rank test."""
+    """Paired comparison of the two outlines, at both object and image level.
+
+    **Why two levels.** A signed-rank test over ~4,500 individual nuclei assumes
+    they are independent observations. They are not: boundary placement depends on
+    focus, exposure and staining, all of which are properties of the *field*, so
+    objects within one image are correlated. The effective sample size is nearer
+    the number of fields than the number of objects, and an object-level p-value
+    is therefore overstated -- by many orders of magnitude at this n.
+
+    So the headline test is the **per-image** one: reduce each field to its median
+    offset for each outline, then compare those paired medians across fields. That
+    respects the clustering, costs almost nothing in significance for an effect
+    this consistent, and cannot be attacked on independence grounds. The
+    object-level numbers are still reported, marked as uncorrected, because the
+    per-object distribution is what the figure draws.
+    """
     if not fits:
         return {}
     gt_lvl = np.array([f.gt_level for f in fits])
@@ -205,28 +220,56 @@ def summarize(fits: list[BoundaryFit]) -> dict:
         "pred_grad_median": float(np.median(pr_grd)),
         "pred_sharper_fraction": float(np.mean(pr_grd > gt_grd)),
     }
+    # Per-image medians: one paired observation per field, which is the level at
+    # which the observations are actually independent.
+    by_image: dict[str, list[BoundaryFit]] = {}
+    for f in fits:
+        by_image.setdefault(f.name, []).append(f)
+    img_gt = np.array([np.median([f.gt_error for f in v]) for v in by_image.values()])
+    img_pr = np.array([np.median([f.pred_error for f in v]) for v in by_image.values()])
+    img_gt_g = np.array([np.median([f.gt_grad for f in v]) for v in by_image.values()])
+    img_pr_g = np.array([np.median([f.pred_grad for f in v]) for v in by_image.values()])
+    out["per_image"] = {
+        "n_images": len(by_image),
+        "gt_abs_error_median": float(np.median(img_gt)),
+        "pred_abs_error_median": float(np.median(img_pr)),
+        "pred_closer_fraction": float(np.mean(img_pr < img_gt)),
+        "pred_sharper_fraction": float(np.mean(img_pr_g > img_gt_g)),
+    }
+
     try:
         from scipy.stats import wilcoxon
 
-        # Paired, two-sided: is either outline systematically closer to half-max?
-        out["wilcoxon_p_abs_error"] = float(wilcoxon(pr_err, gt_err).pvalue)
-        out["wilcoxon_p_gradient"] = float(wilcoxon(pr_grd, gt_grd).pvalue)
+        # Headline: paired over fields, respecting within-image correlation.
+        out["per_image"]["wilcoxon_p_abs_error"] = float(wilcoxon(img_pr, img_gt).pvalue)
+        out["per_image"]["wilcoxon_p_gradient"] = float(wilcoxon(img_pr_g, img_gt_g).pvalue)
+        # Uncorrected, over objects. Retained for the figure, not for inference.
+        out["wilcoxon_p_abs_error_uncorrected"] = float(wilcoxon(pr_err, gt_err).pvalue)
+        out["wilcoxon_p_gradient_uncorrected"] = float(wilcoxon(pr_grd, gt_grd).pvalue)
     except Exception:  # scipy.stats is optional for the rest of the module
         pass
     return out
 
 
 def verdict(summary: dict) -> str:
-    """One line stating what the paired comparison licenses us to say."""
+    """One line stating what the paired comparison licenses us to say.
+
+    Quotes the per-image test, not the per-object one -- see `summarize`.
+    """
     if not summary:
         return "no measurable objects"
     gt_e, pr_e = summary["gt_abs_error_median"], summary["pred_abs_error_median"]
     frac = summary["pred_closer_fraction"]
-    p = summary.get("wilcoxon_p_abs_error", float("nan"))
+    img = summary.get("per_image", {})
+    p = img.get("wilcoxon_p_abs_error", float("nan"))
+    n_img = img.get("n_images", 0)
+    img_frac = img.get("pred_closer_fraction", float("nan"))
     who = "the prediction" if pr_e < gt_e else "the ground truth"
     return (
         f"{who} sits closer to half-maximum on {max(frac, 1 - frac):.0%} of "
         f"{summary['n_objects']} nuclei "
         f"(median offset {min(pr_e, gt_e):.3f} vs {max(pr_e, gt_e):.3f} of local "
-        f"contrast, Wilcoxon p={p:.2e})"
+        f"contrast). Aggregated per field, which is the level at which the "
+        f"observations are independent: {img_frac:.0%} of {n_img} fields, "
+        f"Wilcoxon p={p:.2e}"
     )
