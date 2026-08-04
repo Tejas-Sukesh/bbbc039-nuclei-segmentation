@@ -1,0 +1,26 @@
+[project]
+name = "nucleiseg"
+version = "0.1.0"
+description = "Nuclei instance segmentation on BBBC039 with self-evaluation against ground truth"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-image>=0.22",
+    "tifffile>=2024.1.30",
+    "imageio>=2.34",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# Only needed if the deep-learning comparison in RESOURCES.md §4 gets built out.
+dl = ["torch>=2.2", "stardist>=0.9", "csbdeep>=0.7"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

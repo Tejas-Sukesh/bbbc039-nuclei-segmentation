@@ -1,0 +1,21 @@
+# Dataset — downloaded via scripts/download_data.sh, never committed (~80 MB)
+data/
+
+# Outputs
+results/**
+!results/.gitkeep
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+__MACOSX/
+.vscode/
+.idea/
