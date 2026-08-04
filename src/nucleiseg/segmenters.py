@@ -97,13 +97,29 @@ class FlowCache:
         device: str | None = None,
         cache_dir: Path | None = None,
         augment: bool = False,
+        diameter: float | None = None,
+        norm_blocksize: int = 0,
     ):
         self.model_name = model_name
         self.augment = augment
+        # Cellpose normalises brightness over the whole image by default, so a
+        # field containing a few very bright nuclei compresses everything dimmer
+        # toward background. A non-zero blocksize normalises within tiles of that
+        # size instead, judging each nucleus against its own neighbourhood.
+        self.norm_blocksize = int(norm_blocksize)
+        # Cellpose rescales the input by `30 / diameter` before the network sees
+        # it, so this is the one knob that changes the *scale* of what the network
+        # is shown rather than how its output is post-processed. None leaves the
+        # image at native resolution.
+        self.diameter = diameter
         self.device = _resolve_device(device)
         # Separate subdirectory per network-level config, since those parameters
         # change the cached flows themselves.
         tag = f"{model_name}{'_aug' if augment else ''}"
+        if diameter is not None:
+            tag += f"_d{diameter:g}"
+        if self.norm_blocksize:
+            tag += f"_tn{self.norm_blocksize}"
         self.cache_dir = (cache_dir or CACHE_DIR) / tag
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._model = None
@@ -132,7 +148,16 @@ class FlowCache:
             return
         if image is None:
             image = load_sample(name).image
-        _, flows, _ = self.model.eval(image, augment=self.augment)
+        normalize: bool | dict = True
+        if self.norm_blocksize:
+            from cellpose.models import normalize_default
+
+            normalize = {**normalize_default, "tile_norm_blocksize": self.norm_blocksize}
+        _, flows, _ = self.model.eval(image, augment=self.augment,
+                                      diameter=self.diameter, normalize=normalize)
+        # Cellpose resamples its output back to the input resolution, so the
+        # cached arrays stay comparable across diameters and the post-processing
+        # path below needs no special case.
         dP, cellprob = flows[1], flows[2]
         np.savez_compressed(
             self.path(name),

@@ -440,6 +440,53 @@ def what_gets_missed(missed_csv: Path, gt_areas: np.ndarray, out: Path) -> Path:
     return _save(fig, out)
 
 
+def missed_gallery(rows, predict, out: Path, pad: int = 26, zoom: int = 5) -> Path:
+    """Close-ups of missed objects across the size range, for eyeballing.
+
+    The failure analysis says 81% of misses are under 100 px and the smallest is
+    2 px. Whether that is a detection failure or a disagreement about what counts
+    as a nucleus is not something a table can settle -- it needs looking at. This
+    renders the raw pixels around each missed object at high zoom, with the
+    annotation drawn on, so the question "is that actually a nucleus?" can be
+    answered by inspection rather than asserted.
+
+    `rows` should span the size range, not just the smallest, so the reader can
+    see where the population stops looking like debris and starts looking like
+    cells.
+    """
+    rows = list(rows)
+    cols = min(4, len(rows))
+    nrow = int(np.ceil(len(rows) / cols))
+    fig, axes = plt.subplots(nrow, cols, figsize=(3.5 * cols, 3.9 * nrow),
+                             squeeze=False)
+    cache: dict[str, tuple] = {}
+    for ax, r in zip(axes.ravel(), rows):
+        name = r["name"]
+        if name not in cache:
+            s = load_sample(name)
+            cache[name] = (s.image, M.relabel_sequential(s.labels)[0], predict(name))
+        image, gt, pred = cache[name]
+        gid = int(r["gt_id"])
+        ys, xs = np.nonzero(gt == gid)
+        if not len(ys):
+            continue
+        cy, cx = int(ys.mean()), int(xs.mean())
+        y0, y1 = max(cy - pad, 0), min(cy + pad, image.shape[0])
+        x0, x1 = max(cx - pad, 0), min(cx + pad, image.shape[1])
+        sub = outlined(image[y0:y1, x0:x1], (gt[y0:y1, x0:x1] == gid).astype(np.int32),
+                       pred[y0:y1, x0:x1])
+        ax.imshow(np.kron(sub, np.ones((zoom, zoom, 1))), interpolation="nearest")
+        ax.set_title(f"{float(r['area']):.0f} px  ·  brightness {float(r['mean_intensity']):.0f}"
+                     f"\n{r['kind']}", fontsize=9, color=C_INK)
+    for ax in axes.ravel():
+        ax.axis("off")
+    fig.suptitle("Missed objects, smallest to largest.  orange = what the human marked,"
+                 "  blue = what the model found\n"
+                 "The question each panel asks: is that a nucleus, or a speck?",
+                 fontsize=11, color=C_INK)
+    return _save(fig, out)
+
+
 def merge_gallery(merges, predict, out: Path, n: int = 6, pad: int = 18,
                   subtitle: str = "") -> Path:
     """Close-ups of the predictions that fused several nuclei.
