@@ -32,3 +32,9 @@ __MACOSX/
 
 # Cached Cellpose network outputs (regenerable, large)
 data/flow_cache/
+
+# Paper PDF kept locally for reference, not redistributed
+2025.04.28.651001.full.pdf
+
+# Exploratory work outside the submission
+experiments/

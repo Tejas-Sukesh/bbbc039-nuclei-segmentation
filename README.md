@@ -72,6 +72,9 @@ python scripts/06_figures.py
 python scripts/01_cache_flows.py --augment --splits validation test
 python scripts/07_tta_comparison.py --split validation
 python scripts/07_tta_comparison.py --split test   # the held-out number
+
+python scripts/09_diameter.py --diameters 15       # input rescaling
+python scripts/10_input_level.py                   # + local normalization
 ```
 
 Only step 1 is slow (~35 min for all 200 fields). Everything after it reads the
@@ -248,6 +251,25 @@ These are not the crowded, touching, hard cases one expects to dominate. They ar
 small bright puncta — and 96 of them fall below Cellpose's default `min_size=15`
 and are discarded by construction.
 
+**Are they nuclei at all?** That is not a question a table can settle, so the
+next figure renders the raw pixels around missed objects across the size range.
+
+![Are these nuclei](figures/fig6_are_these_nuclei.png)
+
+There is a **transition**, not one population. Under ~15 px the annotation sits on
+visually empty background — that is label noise. Between 20 and 100 px the objects
+are real but very faint. Above ~100 px they are unmistakable nuclei that the model
+genuinely merged or missed. So the misses can be dismissed neither as bad
+annotation nor as model failure; both are present, in a size-graded mixture. The
+practical consequence: any "report the score excluding small objects" cut has to
+be set low — around 15 px — or it starts excluding real failures.
+
+**Brightness is a second, independent axis.** Comparing missed against found
+objects *at matched size*, the missed ones are 15–25% dimmer relative to local
+background in every size band including the largest. The model finds **98.1% of
+bright objects and 85.6% of faint ones.** Refutation #10 tests the obvious
+explanation for that and rules it out.
+
 ### 3. What the merges actually fuse — and why the obvious fix would fail
 
 ![Merges](figures/fig4_merges.png)
@@ -281,6 +303,17 @@ distance transform at all. Only ~23% of merges are even addressable that way, an
 each repair introduces two new boundaries on the least reliable part of the
 image — which then have to land within half a pixel to score at the thresholds
 where the AP is actually being lost.
+
+**What does reach them is resolution.** Refutation #9 found that running the
+network on a 2× upscaled input drops merges from 103 to 69, and halves the
+genuine two-nuclei fusions from 24 to 12 — while leaving the small-object misses
+completely untouched (265 → 266). So the two failure modes in this section have
+*different* causes despite sharing a metric: the satellite class is an
+annotation-convention disagreement that rescaling does not touch, and the
+comparable class is substantially a resolution limit. The overall AP barely moved,
+because the merge gain was traded for more splits (24 → 36) and more false
+positives (91 → 120) — a trade only visible because splits and merges are counted
+separately.
 
 ### 4. The worst individual fields
 
@@ -360,8 +393,8 @@ rises, the gain concentrates at IoU ≥ 0.85, and the merge count holds, because
 merge is a *bias* and averaging eight flips of the same biased model reproduces it
 more confidently. All three held: +0.0023 AP (intervals overlapping), gain at
 strict thresholds +0.0036 against +0.0018 at loose ones, merges 103 → 99. So TTA
-is not a fix, and its failing in exactly the predicted way is independent
-confirmation that the errors sit upstream of anything post-processing can reach.
+is not a fix. Note the conclusion I drew from it — that merges are an *unreachable*
+bias — was too strong, and refutation #9 below overturns it.
 
 **6. Border-clipped nuclei are a significant failure mode.** Truncated objects
 have small area and off-centre distance maxima, so they were a natural suspect for
@@ -383,6 +416,65 @@ splits. The split is field-level only, so the test score measures generalization
 across fields of one experiment — **not** across plates, microscopes, or staining
 runs, and it should not be read as evidence the pipeline transfers to a new
 screen.
+
+**9. Small objects are missed because they fall below the network's trained size
+range.** This one is the most interesting failure, because it broke *both* of its
+registered predictions and overturned a conclusion above.
+
+The case was quantitative. Cellpose's generalist models are trained on objects
+7.5–120 px across; this dataset's median nucleus is 28.1 px — the training mean,
+which explains why the defaults were unbeatable. But the median *missed* object is
+20 px in area, about **5 px across — below the trained range entirely**. Upscaling
+2× (`diameter=15`, since Cellpose rescales by `30/diameter`) maps the dataset's
+3.9–41.4 px spread onto 7.8–82.8 px, landing the whole distribution inside the
+trained range. Predicted in
+[`09_diameter.py`](scripts/09_diameter.py) before running: small-object recall
+rises, precision falls, merges hold.
+
+```
+                      default    2x upscale
+missed under 50 px       265          266      <- predicted a large drop
+merges                   103           69      <- predicted no change
+  of which real fusions   24           12
+splits                    24           36
+false positives           91          120
+AP                    0.8069       0.8090      (intervals overlap)
+```
+
+**Both main predictions broke.** Small objects did not move at all — 265 to 266 —
+so the out-of-distribution-size explanation is simply wrong; they are not missed
+for want of resolution. And merges, which #5 concluded were a bias that could not
+be reached, dropped by a third, with genuine two-nuclei fusions halving. **Merges
+are substantially a resolution problem.** #5's conclusion was overreach from a
+single intervention: averaging cannot fix them, but that is not the same as
+nothing can.
+
+**10. Faint objects are being drowned out by their bright neighbours.** Since size
+was ruled out, the next candidate was contrast. Comparing missed against found
+objects *at matched size*, missed objects are consistently 15–25% dimmer relative
+to local background in every size band including the largest — so dimness is an
+axis independent of size. And the model finds **98.1% of bright objects but only
+85.6% of faint ones**.
+
+Cellpose normalises brightness across the whole image, so a field with a few very
+bright nuclei compresses everything dimmer toward background.
+`tile_norm_blocksize=128` normalises within local tiles instead, judging each
+nucleus against its own neighbourhood.
+
+| | AP | F1@0.5 | faint objects found | false positives | merges |
+|---|---|---|---|---|---|
+| default | 0.8069 | 0.9620 | 85.6% | 91 | 103 |
+| local normalisation | 0.8074 | **0.9632** | 85.8% | 91 | 102 |
+| 2× upscale | **0.8090** | 0.9628 | 86.6% | 120 | 69 |
+| both | 0.8080 | 0.9631 | 86.5% | 122 | 68 |
+
+Faint-object recall moved 85.6% → 85.8%. Nothing. And combining it with upscaling
+was slightly *worse* than upscaling alone, so the two do not compound.
+
+The diagnosis was right and the mechanism was wrong: these objects are not faint
+*relative to their surroundings*, they are faint in absolute terms — close to the
+sensor noise floor. Rebalancing contrast cannot create signal that was never
+recorded.
 
 ## Approach
 
@@ -520,8 +612,16 @@ classical pipeline's watershed produces no such score, which is why the DSB
 convention was chosen for comparability.)
 
 Explicitly **not** worth doing, having been measured: further post-processing
-parameter search (#1–3 above), bandit-based search on this grid (#4), and
-distance-transform merge repair (§3).
+parameter search (#1–3), bandit-based search on this grid (#4),
+distance-transform merge repair (§3), and local contrast normalisation (#10).
+
+One genuinely open lead, from #9: **rescaling reaches merges.** 2× halved the
+genuine two-nuclei fusions, and the gain was cancelled by more splits and false
+positives rather than by any limit of the mechanism. A scale *sweep* rather than a
+single point — or applying the upscale selectively to crowded regions, which the
+existing per-image features could gate — might keep the merge gain without paying
+the split cost. That is the one intervention here with a demonstrated effect and
+an obvious next step.
 
 ## Repo layout
 
@@ -546,6 +646,8 @@ scripts/
   05_failure_analysis.py    error inventory + annotation ceiling
   06_figures.py             every figure, rendered from results/
   07_tta_comparison.py      TTA before/after with a registered prediction
+  09_diameter.py            input rescaling; both predictions broke
+  10_input_level.py         local normalization, and combined with rescaling
   08_flowcache_benchmark.py the optimization, measured and verified
 tests/            37 tests: metrics, matching equivalence, bandits
 results/          summaries and per-image rows for every number quoted here
