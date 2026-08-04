@@ -1,13 +1,33 @@
 # Nuclei instance segmentation on BBBC039
 
-Take-home for the Neo Scholar program. Segments individual nuclei from
-fluorescence microscopy images and scores itself against hand-annotated ground
-truth.
+Segments individual nuclei from fluorescence microscopy images and scores itself
+against hand-annotated ground truth, on the 200-field
+[BBBC039](https://bbbc.broadinstitute.org/BBBC039) benchmark.
 
-> **Status: scaffold.** Data loading and ground-truth decoding are implemented
-> and validated against the dataset's published nucleus count. The segmenter,
-> metrics, and evaluation harness are stubbed with their design decisions
-> written down. Results sections below are placeholders and are marked as such.
+**Headline result:** mean AP@[.5:.95] of **0.791** on the held-out test split
+(95% CI [0.766, 0.812]), 95.6% F1 at IoU 0.5.
+
+**The finding that matters more.** Over half of the remaining gap to a perfect
+score is not segmentation error at all. 54% of the total shortfall is spent at
+IoU 0.90 and 0.95, where "correct" means agreeing with a hand-drawn outline to
+within about half a pixel — and when the image itself is asked to arbitrate,
+**the model's outline is closer to the true nucleus edge than the human's is, on
+73% of 4,502 nuclei.** At the strict end, this metric is scoring the model
+against an annotation less accurate than the prediction being graded.
+
+Everything below was measured on this machine and is committed alongside the
+numbers in [`results/`](results/), so each figure quoted can be checked against
+the file that produced it.
+
+---
+
+## Contents
+
+- [Quickstart](#quickstart) · [Results](#results) · [The optimization](#the-one-thing-optimized-deliberately)
+- [Where it fails](#where-it-fails) — the main section
+- [What I tested and refuted](#what-i-tested-and-refuted) — eight hypotheses, with numbers
+- [Approach](#approach) · [The dataset trap](#the-ground-truth-is-not-what-it-looks-like) · [Metric conventions](#metric-conventions)
+- [What I'd try next](#what-id-try-next) · [Limitations](#limitations)
 
 ## Quickstart
 
@@ -18,11 +38,13 @@ git clone https://github.com/Tejas-Sukesh/bbbc039-nuclei-segmentation.git
 cd bbbc039-nuclei-segmentation
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
-bash scripts/download_data.sh          # ~80 MB from the Broad Institute
-python -m nucleiseg.data                # sanity check: prints per-split stats
+
+bash scripts/download_data.sh     # ~80 MB from the Broad Institute
+python -m pytest tests/ -q        # 37 tests
+python -m nucleiseg.data          # sanity check; must total 23,617 nuclei
 ```
 
-That last command should print:
+That last command must print:
 
 ```
 training    images=100 nuclei= 12001 mean= 120.0 min=  0 max=194 empty_fields=2
@@ -30,149 +52,511 @@ validation  images= 50 nuclei=  5896 mean= 117.9 min=  0 max=231 empty_fields=1
 test        images= 50 nuclei=  5720 mean= 114.4 min=  7 max=202 empty_fields=0
 ```
 
-If the nuclei counts differ, the mask decoding is wrong — see below.
+**If the nuclei counts differ, the mask decoding is wrong** — see
+[the dataset trap](#the-ground-truth-is-not-what-it-looks-like).
 
-## The dataset
+Then reproduce the results, in order:
 
-[BBBC039](https://bbbc.broadinstitute.org/BBBC039): 200 fields of U2OS cells,
-Hoechst-stained, from the Broad Bioimage Benchmark Collection. 16-bit TIFF at
-520 × 696. 23,617 hand-annotated nuclei, ~118 per field. I use the published
-train/validation/test split of 100/50/50 as given rather than re-splitting, so
-the numbers stay comparable to published work on this dataset.
+```bash
+python scripts/01_cache_flows.py                 # ~10 s/image, once, resumable
+python scripts/08_flowcache_benchmark.py         # the optimization, measured
+python -m nucleiseg.evaluate --split validation --tag cellpose_default_validation
+python scripts/05_failure_analysis.py --split validation
+python scripts/06_figures.py
 
-Worth being precise about what that split does and doesn't control for: it is
-**field-level, not plate-level**. I checked the split lists against
-`metadata/filenames_and_plates.csv`, and all 20 BBBC022 plates appear in all
-three splits — no imaging batch is held out. So a test score here measures
-generalization across fields of the same experiment, not across plates,
-microscopes, or staining runs, and it should not be read as evidence the
-pipeline transfers to a new screen.
+python scripts/01_cache_flows.py --augment --splits validation test
+python scripts/07_tta_comparison.py --split validation
+python scripts/07_tta_comparison.py --split test   # the held-out number
+```
 
-Two things about the raw data that affect the pipeline: intensities occupy
-roughly 120–4095 rather than the full 16-bit range (120 is the camera floor, not
-black), and three fields contain **zero** nuclei, which makes them a division-by-
-zero hazard in any per-image metric.
+Only step 1 is slow (~35 min for all 200 fields). Everything after it reads the
+cache and runs in seconds — which is the point of
+[the optimization](#the-one-thing-optimized-deliberately).
+
+## Results
+
+Cellpose-SAM at its stock parameters, its own test-time augmentation, and a
+from-scratch classical pipeline, all scored identically. Intervals are
+percentile bootstrap over images.
+
+**Validation** (50 fields, 5,896 nuclei) — every parameter choice was made here.
+
+| Method | AP@[.5:.95] | 95% CI | F1@0.5 | mean IoU | splits | merges | count bias |
+|---|---|---|---|---|---|---|---|
+| Classical (Otsu → distance → watershed) | 0.555 | [0.515, 0.588] | 0.821 | 0.892 | 405 | 169 | −0.19% |
+| **Cellpose-SAM, stock parameters** | **0.807** | [0.789, 0.825] | 0.962 | 0.928 | 24 | 103 | −4.51% |
+| Cellpose-SAM + test-time augmentation | 0.809 | [0.792, 0.827] | 0.962 | 0.929 | 25 | 99 | −4.61% |
+
+**Test** (50 fields, 5,720 nuclei) — touched only after the above was settled.
+
+| Method | AP@[.5:.95] | 95% CI | F1@0.5 | mean IoU | splits | merges | count bias |
+|---|---|---|---|---|---|---|---|
+| Classical | 0.576 | [0.548, 0.600] | 0.858 | 0.886 | 364 | 197 | −0.42% |
+| **Cellpose-SAM, stock parameters** | **0.791** | [0.766, 0.812] | 0.956 | 0.926 | 16 | 114 | −4.32% |
+| Cellpose-SAM + test-time augmentation | 0.792 | [0.767, 0.813] | 0.956 | 0.926 | 15 | 120 | −4.30% |
+
+Two things to read off this table beyond the ranking.
+
+**The classical pipeline's count bias is the best in the table, and that is a
+trap.** At −0.19% it looks better calibrated than Cellpose's −4.5%, but it gets
+there by making 405 splits *and* 169 merges — 574 topology errors that cancel in
+the object count. This is exactly why
+[splits and merges are counted separately](#metric-conventions) from any
+count-based statistic. A single aggregate would have called the worse pipeline
+better calibrated.
+
+**Test scores below validation, consistently** (0.791 vs 0.807), across all three
+methods. Since no method was tuned, this is a property of the splits rather than
+overfitting: the test fields are slightly harder.
+
+## The one thing optimized deliberately
+
+**FlowCache: 8.79 s → 0.109 s per parameter evaluation, an 81× speedup, with
+bit-identical output.** Measured by
+[`scripts/08_flowcache_benchmark.py`](scripts/08_flowcache_benchmark.py), saved
+to [`results/flowcache_benchmark.json`](results/flowcache_benchmark.json).
+
+Cellpose-SAM inference costs ~9 s per field on Apple Silicon MPS, which makes any
+parameter search impractical — the 18-arm grid over 50 validation images is 900
+evaluations, **2.2 hours** at that rate. But the expensive part is only the
+network forward pass, which emits a flow field `dP` and a probability map
+`cellprob`. Everything the tunable parameters touch happens *after* that, in
+`cellpose.dynamics.resize_and_compute_masks`.
+
+So the network runs once per image, its two output arrays are cached to disk as
+float16, and the parameters are swept over the cache. The same 900 evaluations
+now take **1.6 minutes**.
+
+The equivalence has to be exact rather than approximate, because the float16 cast
+is lossy. `np.array_equal` on the resulting label images returns `True` on every
+image tested — identical instances, which is the property that matters, not
+identical intermediates. The benchmark script fails loudly if that ever stops
+holding, because a speedup that quietly perturbs the masks is not a speedup.
+
+This also partitions the parameters, which is what any optimizer over them needs
+to know:
+
+- **cheap**, recomputed from the cache: `cellprob_threshold`, `flow_threshold`,
+  `min_size`, `max_size_fraction`, `niter`
+- **expensive**, requiring a network pass: `augment`, `normalize`, `diameter`,
+  model choice, tiling
+
+**Why this is the optimization reported, and not an accuracy tweak.** Both
+accuracy levers were tried and both are honestly negative: the cheap parameters
+are already at their optimum in every direction tested, and test-time
+augmentation buys +0.0023 AP with overlapping confidence intervals — inside the
+noise, and `evaluate.compare()` says so in its own output rather than letting it
+be quoted as a win. Reporting an 81× measured, verified compute win is the honest
+answer; reporting a +0.002 AP change as "optimized" would not be. Both negatives
+are documented in [what I tested and refuted](#what-i-tested-and-refuted).
+
+## Where it fails
+
+### 1. The metric's strict end is measuring the annotation, not the model
+
+![Where the score is lost](figures/fig1_where_the_score_is_lost.png)
+
+The headline 0.807 is an average of ten numbers, and they are wildly unequal. At
+IoU 0.50 the score is 0.928; at 0.95 it is 0.309. The right panel converts that
+into shares of the total shortfall: **the two strictest thresholds cause 54% of
+the entire gap to a perfect score**, while everything attributable to detection
+at IoU 0.50 — every missed nucleus, every merge, the whole count bias — accounts
+for under 4% of it.
+
+Mean IoU over matched objects is 0.928. For a median nucleus of 622 px that works
+out to roughly **half a pixel** of average boundary displacement. So the question
+is whether a hand-drawn outline is even accurate to half a pixel, and if not,
+what the strict thresholds are actually measuring.
+
+That is a claim about the ground truth, so it needs a referee that is neither
+outline. The image is one. A nucleus has a real intensity edge, and its
+conventional sub-pixel location is the **half-maximum**: the level halfway
+between the object's interior and its local background. For each nucleus,
+[`boundary.py`](src/nucleiseg/boundary.py) estimates that reference locally and
+asks which outline lands closer — never consulting the other outline. The
+comparison is paired per object, because contrast varies far more between nuclei
+than the effect being measured, and pooled distributions would drown it.
+
+![Annotation ceiling](figures/fig2_annotation_ceiling.png)
+
+On 4,502 nuclei across 49 fields:
+
+| | hand-drawn ground truth | model prediction |
+|---|---|---|
+| Median distance from the true edge | 0.083 | **0.045** |
+| Closer to the true edge | 27% of nuclei | **73%** |
+| Sits on the steeper intensity gradient | 21% | **79%** |
+
+Both outlines trace slightly *tight* — inside the true edge — but the human
+traces tighter, by roughly a factor of two (Wilcoxon signed-rank
+p ≈ 4 × 10⁻³⁰², with the gradient-based check agreeing independently at 79%).
+
+**So more than half of the reported error is a ceiling, not a defect.** No amount
+of tuning, augmenting, or fine-tuning recovers it, because the target it is being
+scored against is itself further from the truth than the prediction. The
+practical consequence: on this dataset, AP at IoU ≥ 0.90 should be read as a
+noise floor, and F1@0.5 or AP@[.5:.75] is the informative range.
+
+What this does **not** establish is *why* the human outlines sit tighter —
+annotator imprecision and a genuine human/network disagreement about where a
+nucleus ends are not separable here. Nobody traced any nucleus in BBBC039 twice,
+so inter-annotator agreement, the direct measure of human precision, is not
+computable on this dataset at all.
+
+### 2. What actually gets missed: one population of very small objects
+
+![What gets missed](figures/fig3_what_gets_missed.png)
+
+Recall at IoU 0.5 is 93.9% — 357 of 5,896 nuclei missed.
+[`failures.py`](src/nucleiseg/failures.py) classifies each by mechanism, since a
+nucleus absorbed into a neighbour and one never detected cost the same in AP but
+need opposite fixes:
+
+| Mechanism | Count | |
+|---|---|---|
+| Never detected — nothing predicted there at all | 185 | 52% |
+| Absorbed — inside a prediction that also claims another nucleus | 125 | 35% |
+| Outline drifted — overlaps a prediction, too weakly to match | 47 | 13% |
+
+The size profile is the finding. **The median missed nucleus is 20 px, against
+622 px for a typical one. 81% are under 100 px.** Detection is near-perfect above
+400 px — 9 misses among 4,773 objects, 0.2% — and collapses below 50 px: every
+one of the 96 objects under 15 px is missed, along with 169 of the 255 between 15
+and 50 px.
+
+These are not the crowded, touching, hard cases one expects to dominate. They are
+small bright puncta — and 96 of them fall below Cellpose's default `min_size=15`
+and are discarded by construction.
+
+### 3. What the merges actually fuse — and why the obvious fix would fail
+
+![Merges](figures/fig4_merges.png)
+
+103 predictions each cover two or more annotated nuclei. The natural reading is
+the textbook one: touching nuclei whose flow fields converge on a single centre.
+Breaking the merges down by the *sizes* of what they fused says otherwise:
+
+| Kind | Count | | What it is |
+|---|---|---|---|
+| Satellite | 62 | 60% | one normal nucleus (median 510 px) + a much smaller object (median 44 px) |
+| Comparable | 24 | 23% | two nuclei of similar size genuinely fused |
+| Mixed | 17 | 17% | neither cleanly |
+
+**60% of "merges" are a normal nucleus plus a tiny punctum the annotation calls
+its own nucleus and the network calls part of the parent.** Genuine
+touching-nuclei separation failures are 24 objects out of 5,896 — 0.4%. The top
+row of the figure is the satellite case, the bottom row the real thing; they look
+nothing alike.
+
+This unifies the whole failure analysis. The 185 never-detected objects (median
+20 px), the 125 absorbed ones, and the −4.5% count bias are **one root cause**: a
+population of very small annotated objects that Cellpose treats as part of the
+parent nucleus rather than as separate instances. It is closer to an
+annotation-convention disagreement than to a segmentation failure.
+
+It also **refutes the repair I had planned**. Detecting suspicious fused objects
+and re-splitting them with a distance-transform watershed cannot work on the
+dominant class: a bright punctum inside a nucleus is not a separate basin in the
+distance transform at all. Only ~23% of merges are even addressable that way, and
+each repair introduces two new boundaries on the least reliable part of the
+image — which then have to land within half a pixel to score at the thresholds
+where the AP is actually being lost.
+
+### 4. The worst individual fields
+
+[`figures/worst_cases/`](figures/worst_cases/) holds four-panel renders (raw,
+ground truth, prediction, error map) for the lowest-scoring validation fields,
+selected by sorting the per-image CSV rather than by eye — which is why
+[`evaluate.py`](src/nucleiseg/evaluate.py) writes per-image rows in the first
+place.
+
+![Per-image spread](figures/fig5_per_image_scores.png)
+
+Per-image AP ranges 0.70–0.90 around a mean of 0.807, so any single-number
+comparison between two configurations on 50 images is fighting a standard
+deviation an order of magnitude larger than the effects being chased. That is why
+every headline number here carries a bootstrap interval, and why
+`evaluate.compare()` refuses to state a before/after without checking whether the
+intervals overlap.
+
+## What I tested and refuted
+
+Eight hypotheses, each with a reason to believe it and a measurement that killed
+it. The refutations were more useful than the confirmations, so they are reported
+rather than quietly dropped.
+
+**1. Lowering `cellprob_threshold` recovers the under-counted nuclei.** It is
+documented to find "more and larger masks," and there is a −4.5% count deficit to
+close. Swept in *both* directions on 12 validation images, the default is the
+optimum:
+
+```
+cellprob_threshold    AP       count bias   splits  merges
+      -0.5          0.7930      -4.9%          3      26
+      +0.0          0.8028      -5.1%          3      25   <- default, best
+      +0.5          0.7838      -5.9%          3      24
+      +1.0          0.7514      -6.4%          3      24
+      +2.0          0.6695      -7.5%          3      18
+```
+
+**2. The count bias is a post-processing artifact.** Refuted by the same sweep,
+and this is the informative part: `cellprob_threshold` swings AP by 13 points
+while the count bias stays pinned between −4.9% and −7.5%. It cannot be the
+mechanism. The deficit lives upstream of any threshold.
+
+**3. Lowering `min_size` is free recall.** 96 validation nuclei are smaller than
+the default 15 px, so they are discarded by construction. But on the same 12
+images, `min_size` 1 or 5 scores 0.7997 against the default's 0.8028: the noise
+objects admitted outweigh the real ones recovered. `niter` 200 → 600 changes
+nothing at all (0.8028 both). These three tables are the one place a 12-image
+subset is quoted rather than the full 50 — they were run while the flow cache was
+still building, and the full-validation numbers in
+[Results](#results) supersede them for anything load-bearing.
+
+**4. A bandit finds good parameters more cheaply than brute force.** Built UCB1,
+Thompson sampling, and LinUCB, then measured them against exhaustive enumeration
+of the same 24-arm grid over 8 images (192 evaluations) at a 60-pull budget.
+**Both bandits lost.** UCB1 missed the true optimum by 0.0034 AP, Thompson by
+0.0112 — and Thompson's declared best arm had been pulled *once*.
+Recorded in [`results/bandit_sweep_validation.json`](results/bandit_sweep_validation.json)
+as `found_optimum: false`.
+
+Two reasons, and both are more interesting than a working bandit. First, the
+premise died with the optimization: FlowCache made the whole grid enumerable in
+1.6 minutes, so there is no evaluation budget left to economize. Second, the noise
+structure is wrong for the tool — per-image AP has a standard deviation near 0.05
+while arm differences are 0.003–0.01, and these bandits sample *(arm, random
+image)* pairs, so at one to three pulls per arm they are measuring which image got
+drawn. The right design here is a paired comparison: score every arm on the same
+images and compare per-image differences, which cancels the between-image variance
+entirely. That is precisely why exhaustive enumeration found the optimum and the
+adaptive samplers did not.
+
+**5. Test-time augmentation fixes the merges.** It was the most direct remaining
+shot: averaging over flipped tiles reduces variance in the flow field. The
+prediction was registered in
+[`07_tta_comparison.py`](scripts/07_tta_comparison.py) *before* running it — AP
+rises, the gain concentrates at IoU ≥ 0.85, and the merge count holds, because a
+merge is a *bias* and averaging eight flips of the same biased model reproduces it
+more confidently. All three held: +0.0023 AP (intervals overlapping), gain at
+strict thresholds +0.0036 against +0.0018 at loose ones, merges 103 → 99. So TTA
+is not a fix, and its failing in exactly the predicted way is independent
+confirmation that the errors sit upstream of anything post-processing can reach.
+
+**6. Border-clipped nuclei are a significant failure mode.** Truncated objects
+have small area and off-centre distance maxima, so they were a natural suspect for
+the small-object misses. Only **16 of 357** missed nuclei touch the field edge —
+4%. Dead.
+
+**7. My own ground-truth decoding fragments nuclei.** `scipy.ndimage.label`
+defaults to 4-connectivity, so a diagonally pinched nucleus would split into two
+components and manufacture spurious tiny objects — which would have been a
+self-inflicted version of finding #2. Checked directly: 4- and 8-connectivity
+recover **identical** object counts (5,896) and identical sub-15-px counts (96)
+across all of validation. The decode is connectivity-invariant, so those small
+objects are real annotation content.
+
+**8. The published split holds out imaging batches.** An earlier draft of this
+README claimed the split is plate-grouped. It is not. Checked against
+`metadata/filenames_and_plates.csv`: all 20 BBBC022 plates appear in all three
+splits. The split is field-level only, so the test score measures generalization
+across fields of one experiment — **not** across plates, microscopes, or staining
+runs, and it should not be read as evidence the pipeline transfers to a new
+screen.
+
+## Approach
+
+Cellpose-SAM as the segmenter, a from-scratch classical pipeline as the
+diagnostic instrument, and a cache between them that makes the analysis
+affordable.
+
+**Why not implement the model from scratch?** Cellpose-SAM is a foundation model —
+SAM's pretrained transformer backbone adapted and trained on a large
+multi-dataset corpus. Reproducing it is GPU-days plus a training corpus not
+available here. Running it is `pip install cellpose`.
+
+**Why then also build a classical pipeline?** Because "understand what it's
+doing, not just wire together a library" is a constraint on the analysis, not
+only on the code. Every stage of
+[`baseline.py`](src/nucleiseg/baseline.py) — percentile normalize, Otsu
+threshold, Euclidean distance transform, local-maxima seeding, watershed — is
+inspectable, so an error attributes to a *stage* rather than to a black box. It
+scores 0.555 against Cellpose's 0.807, and its value is in *how* it loses: 405
+splits against 169 merges, the exact opposite asymmetry, because
+distance-transform seeding over-segments where a learned flow field
+under-segments. Having two pipelines that fail in opposite directions is what
+makes the merge analysis in §3 legible as a property of the *representation*
+rather than of instance segmentation in general.
+[`viz.stage_panel`](src/nucleiseg/viz.py) renders its intermediates.
+
+**Why not just submit the four lines that call Cellpose?** That is the most
+literal possible instance of wiring together a library. The work here is the
+ground-truth decoding, the 81× cache that made parameter search affordable, and
+the failure attribution — none of which come out of the box.
+
+**Why no fine-tuning?** `cellpose.train.train_seg` exists and 100 labelled images
+adapting a generalist is the textbook biggest lever. It is deliberately left
+undone; see [what I'd try next](#what-id-try-next) for the reason, which is not
+the obvious one.
 
 ### The ground truth is not what it looks like
 
 The masks are the one genuinely tricky part of this dataset, and getting them
-wrong produces plausible-looking output while silently destroying the thing
-being measured.
+wrong produces plausible-looking output while silently destroying the thing being
+measured.
 
 They are RGBA PNGs. Green and blue are all-zero, alpha is all-255, and the red
-channel holds **a 3-color graph coloring rather than instance IDs** — background
-is 0 and every nucleus gets a color in 1–3, assigned only so that two nuclei
-that touch never share a color. So a field containing 190 nuclei has exactly
+channel holds **a 3-colour graph colouring rather than instance IDs** —
+background is 0, and every nucleus gets a colour in 1–3, assigned only so that
+two nuclei that touch never share one. A field containing 190 nuclei has exactly
 four distinct pixel values.
 
-Reading that channel as a label image collapses the whole field into at most
-three enormous connected blobs. Worse, the nuclei it fuses are specifically the
-*touching* ones — which are exactly the hard cases that any instance
-segmentation metric is meant to test. The bug would inflate scores and hide the
-principal failure mode.
+Reading that channel as a label image collapses the field into at most three
+enormous blobs. Worse, the nuclei it fuses are specifically the *touching* ones —
+exactly the hard cases an instance metric exists to test. **The bug inflates the
+score while hiding the principal failure mode**, and it looks entirely plausible.
 
-Recovering instances means running connected components **within each color
-separately** and concatenating the results. That is valid precisely because the
-coloring guarantees same-color nuclei are never adjacent. Implemented in
-[`decode_mask`](src/nucleiseg/data.py); I checked it by counting recovered
-objects across all 200 masks and getting 23,617, which matches the "~23,000"
-the dataset page reports.
+Recovering instances means running connected components **within each colour
+separately** and concatenating, which is valid precisely because the colouring
+guarantees same-colour nuclei are never adjacent. Implemented in
+[`decode_mask`](src/nucleiseg/data.py) and validated two ways: 23,617 objects
+recovered across all 200 masks, matching the ~23,000 the dataset page reports,
+and identical counts under both 4- and 8-connectivity (refutation #7 above).
 
-## Approach
+Two more properties of the raw data that affect the pipeline: intensities occupy
+roughly 120–4095 rather than the full 16-bit range (120 is the camera floor, not
+black), and three fields contain **zero** nuclei, which is a division-by-zero
+hazard in any per-image metric.
 
-A classical, fully inspectable pipeline rather than a neural network — chosen
-because the brief weights failure analysis above raw score, and a pipeline whose
-every stage can be visualized lets me attribute an error to a *stage* instead of
-to a black box.
+### Metric conventions
 
-1. **Normalize** — per-image percentile rescaling, since plate-to-plate
-   illumination varies and the intensity floor is nonzero.
-2. **Threshold** — Otsu for foreground, compared against adaptive/local
-   thresholding.
-3. **Seed** — Euclidean distance transform, then local maxima as one seed per
-   nucleus. This stage decides whether touching nuclei separate.
-4. **Watershed** — flood from the seeds, constrained to the foreground mask.
-5. **Post-filter** — drop objects below a minimum area (kept low: the smallest
-   ground-truth nucleus is ~13 px).
+Decided once, in [`metrics.py`](src/nucleiseg/metrics.py), and held fixed so
+results stay comparable.
 
-### Metrics
+- **Headline:** mean AP over IoU 0.50:0.05:0.95, the DSB2018 convention. Note
+  this "AP" is `TP/(TP+FP+FN)` per threshold — a Jaccard-style ratio over
+  *objects*, **not** area under a precision-recall curve.
+- **Matching:** greedy by descending IoU, provably equivalent to Hungarian at
+  thresholds ≥ 0.5, since a prediction cannot exceed IoU 0.5 with two disjoint
+  ground-truth objects. A randomized test asserts the equivalence.
+- **Splits and merges counted separately** from AP and from any count statistic.
+  They cost nearly the same in AP, need opposite fixes, and cancel exactly in the
+  object count — the classical pipeline's −0.19% count bias over 574 topology
+  errors is that hazard made concrete.
+- **Empty ground truth:** predict nothing → 1.0, predict anything → 0.0.
+  Aggregates are reported both with and without the empty fields, since the
+  convention is worth ~0.004 AP on validation.
+- **Both aggregations:** macro (mean over images) and micro (pooled counts), which
+  answer different questions and each hide something.
+- **Bootstrap 95% CI on every headline number**, and `compare()` warns explicitly
+  when two intervals overlap.
 
-Average precision over IoU thresholds 0.50:0.05:0.95 (the Data Science Bowl 2018
-convention) as the headline number, F1 at IoU 0.5 as the number that is legible
-to a biologist counting cells, and **split/merge counts tracked separately**.
-That last one matters: a pipeline that over-segments and one that
-under-segments can post an identical AP while failing in opposite directions,
-and the aggregate alone cannot tell them apart.
-
-One naming caveat worth stating, since the two are easy to conflate: the Kaggle
-"AP" used here is `TP / (TP + FP + FN)` at each threshold — a Jaccard-style
-ratio over *objects* — not the area under a precision-recall curve.
-
-Aggregation is mean-over-images, not pooled-over-objects, so that dense fields
-do not dominate and sparse-field failures stay visible.
-
-## Results
-
-*Placeholder — not yet measured.*
-
-| Method | AP@[.5:.95] | F1@0.5 | Splits | Merges |
-|---|---|---|---|---|
-| Otsu + watershed (baseline) | TBD | TBD | TBD | TBD |
-| + optimized seeding | TBD | TBD | TBD | TBD |
-
-### The one thing optimized deliberately
-
-*Placeholder.* Planned axis: watershed **seed** parameters (h-maxima suppression
-depth and minimum seed separation), tuned on validation only and reported once
-on test. Chosen because seeding is the stage that determines whether touching
-nuclei are separated, making it the highest-leverage parameter in the pipeline —
-the before/after should move the merge count directly.
-
-## Where it fails
-
-*Placeholder — to be written from measured per-image results, not from
-speculation.* Candidate mechanisms to test, each with a specific reason to
-expect it:
-
-- **Clumped/touching nuclei** — the distance transform of a fused clump may have
-  a single maximum, so watershed receives one seed and returns one object.
-- **Bright debris or saturated artifacts** — Otsu maximizes between-class
-  variance assuming a *bimodal* histogram; one very bright blob shifts the
-  threshold up and dims real nuclei out of the foreground.
-- **Near-empty and empty fields** — with no true bimodality, Otsu must still
-  return a threshold, so it splits noise and manufactures false positives.
-- **Out-of-focus fields** — blurred edges flatten the intensity gradient, so the
-  foreground boundary drifts and IoU degrades even when detection succeeds.
-- **Mitotic and apoptotic nuclei** — atypical shape and brightness break both
-  the roundness assumption behind distance-transform seeding and the area filter.
-- **Border-clipped nuclei** — truncated objects have small area and off-center
-  distance maxima.
-- **Very small nuclei** — anything near the ~13 px floor competes directly with
-  the `min_area` filter meant to suppress noise.
+F1@0.5 is reported alongside as the number legible to a biologist counting cells,
+and given §1, it is arguably the more honest headline for this dataset.
 
 ## What I'd try next
 
-*Placeholder.* See [RESOURCES.md](RESOURCES.md) §4 for the deep-learning options
-and their setup cost on this machine.
+In descending order of expected value, with the reason each is worth doing.
+
+**1. Decide what those small objects are, then score both ways.** This is the
+highest-value next step by a wide margin, because it determines whether the
+dominant failure mode is even a failure. The 96 sub-15-px objects and the 62
+satellite merges need a biologist's read: micronuclei, mitotic figures, apoptotic
+fragments, and debris are all plausible, and BBBC039's annotation protocol does
+not say. If they are real nuclei, `min_size` and the flow-field's treatment of
+puncta are the targets. If they are annotation artifacts, the honest move is to
+report AP with and without objects below a stated size floor — which would raise
+recall from 93.9% substantially at zero modelling cost.
+
+**2. Get a second annotator on a subset.** §1's ceiling argument is currently
+one-sided: it shows the model's outline is closer to the image's own edge, but
+cannot separate annotator imprecision from a genuine disagreement about where a
+nucleus ends. Re-tracing even 20 nuclei twice would give a real inter-annotator
+agreement number and convert the ceiling from an inference into a measurement.
+
+**3. Fine-tune, but for the diagnosis, not the score.** `train_seg` on the 100
+training fields would likely improve AP — and that is the problem. Given §1, a
+fine-tuned model would gain partly by learning the annotator's systematic
+tightness, improving the metric while making the segmentation objectively no
+better. That makes it a *test of the ceiling claim* rather than an improvement:
+if the gain concentrates at IoU ≥ 0.90 and the fine-tuned boundaries move
+*away* from half-maximum, the ceiling argument is confirmed in the most direct
+way available. Skipped here because MPS training time was unmeasured against a
+hard deadline, and a probe that cannot distinguish "won't converge" from "needs
+another 15 minutes" produces sunk cost rather than a decision.
+
+**4. A genuinely different backbone.** `cpdino` swaps SAM for DINOv3 and is
+available in the installed Cellpose. Its errors should be the least correlated
+with the current model's, which is the precondition for either an ensemble or
+per-image model selection to have anything to work with. Worth one cache
+(~15 min) purely to measure error correlation — if the two models disagree about
+the same nuclei, there is no headroom and the ensemble question is settled
+cheaply.
+
+**5. Per-object confidence, for a real precision-recall curve.** Mean `cellprob`
+over each predicted object is a serviceable confidence score, which would make a
+genuine detection AP computable rather than the count-ratio used here. (The
+classical pipeline's watershed produces no such score, which is why the DSB
+convention was chosen for comparability.)
+
+Explicitly **not** worth doing, having been measured: further post-processing
+parameter search (#1–3 above), bandit-based search on this grid (#4), and
+distance-transform merge repair (§3).
 
 ## Repo layout
 
 ```
 src/nucleiseg/
-  data.py       ground-truth decoding + split loading   [implemented]
-  metrics.py    IoU matching, AP sweep, split/merge     [stub]
-  baseline.py   normalize -> threshold -> seed -> watershed [stub]
-  evaluate.py   harness + parameter sweep               [stub]
-  viz.py        overlays, error panels, worst cases      [stub]
-scripts/download_data.sh
-RESOURCES.md    annotated reading list, verified vs. not
+  data.py         ground-truth decoding, split loading, dataset stats
+  metrics.py      IoU matching, DSB AP sweep, splits/merges, bootstrap CIs
+  segmenters.py   unified interface + FlowCache (the 81x optimization)
+  baseline.py     classical pipeline: normalize -> Otsu -> EDT -> watershed
+  boundary.py     half-maximum edge check -- the annotation-ceiling measurement
+  failures.py     per-object error inventory: missed objects, merge composition
+  bandits.py      UCB1, Thompson sampling, LinUCB
+  features.py     three label-free per-image descriptors
+  grids.py        shared parameter space and arm definitions
+  evaluate.py     harness, CSV/JSON persistence, before/after comparison
+  viz.py          overlays, error panels, analysis charts
+scripts/
+  01_cache_flows.py         precompute and cache network output
+  02_bandit_sweep.py        bandits vs exhaustive enumeration
+  03_contextual_bandit.py   LinUCB per-image policy + oracle bound  [unrun]
+  04_final_eval.py          multi-method test comparison            [unrun]
+  05_failure_analysis.py    error inventory + annotation ceiling
+  06_figures.py             every figure, rendered from results/
+  07_tta_comparison.py      TTA before/after with a registered prediction
+  08_flowcache_benchmark.py the optimization, measured and verified
+tests/            37 tests: metrics, matching equivalence, bandits
+results/          summaries and per-image rows for every number quoted here
+figures/          the figures embedded above
+RESOURCES.md      annotated reading list, marked verified vs. not
 ```
 
-The stubs carry the design decisions and the reasoning behind them in their
-docstrings, so the contract is settled before the implementation.
+Scripts 03 and 04 are implemented but were not run: the oracle bound in 03 became
+moot once the cheap parameter space was shown flat (refutations #1–3 leave nothing
+for a per-image policy to choose between), and 07 supersedes 04 for the
+comparison actually reported. They are left in place rather than deleted because
+the design reasoning in their docstrings is part of the record.
 
-## Notes
+## Limitations
 
-`data/` is gitignored; run `scripts/download_data.sh` to populate it. No GPU
-required — the baseline is CPU-only. Developed on Apple Silicon (no CUDA), which
-constrains the deep-learning options discussed in RESOURCES.md.
+- **The test split shares imaging batches with training** (refutation #8), so
+  0.791 measures across-field generalization within one experiment, not
+  across-instrument or across-protocol transfer.
+- **AP at IoU ≥ 0.90 is a noise floor on this dataset**, per §1, and comparisons
+  in that range should not be trusted.
+- **`n = 50` per split.** A one-point AP difference is inside the bootstrap
+  interval; every claim here that survives does so with its interval attached.
+- **The satellite/comparable merge split uses a 0.25 area-ratio heuristic.** The
+  60/23/17 breakdown is robust in direction, but individual borderline cases can
+  flip, which is why the figure labels each panel with the actual object areas
+  rather than asking the reader to trust the class.
+- **The annotation-ceiling result covers 4,502 of 5,896 nuclei** — those matched
+  at IoU 0.5, above 150 px, not touching the field edge, and with enough local
+  contrast for the normalization to be stable. It says nothing about the small
+  objects in §2, which are excluded by the area cut precisely because their
+  boundary statistics are unreliable.
+- **Developed on Apple Silicon, MPS backend, no CUDA.** Timings are
+  machine-specific; the 81× ratio should hold in shape but not in absolute
+  numbers.
