@@ -83,7 +83,15 @@ def split_names(split: str) -> list[str]:
     """
     if split not in SPLITS:
         raise ValueError(f"split must be one of {SPLITS}, got {split!r}")
-    listing = (METADATA / f"{split}.txt").read_text().split()
+    path = METADATA / f"{split}.txt"
+    if not path.exists():
+        # The most likely first-run mistake is running this before fetching the
+        # data, so say that rather than surfacing a bare FileNotFoundError.
+        raise FileNotFoundError(
+            f"{path} not found. The dataset is not in the repo (~80 MB); fetch it "
+            f"first:\n\n    bash scripts/download_data.sh\n"
+        )
+    listing = path.read_text().split()
     return [Path(line).stem for line in listing if line.strip()]
 
 
