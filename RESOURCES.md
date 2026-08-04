@@ -55,8 +55,11 @@ Also worth knowing:
   a competent classical pipeline does stage by stage, even without running
   CellProfiler. This is the closest thing to an official baseline.
 - `metadata/filenames_and_plates.csv` maps each field to its BBBC022 plate.
-  Useful because the published splits are plate-grouped — a random re-split
-  would leak plate-level illumination and confluence effects across train/test.
+  **[verified]** I used it to check whether the published splits hold out
+  imaging batches, and they do not: all 20 plates appear in all three splits, so
+  the split is field-level only. That is a real limitation on what a test score
+  can claim — it measures generalization across fields, not across plates. (One
+  validation field is absent from this CSV, so the mapping is 199/200 complete.)
 - BBBC039 is sampled from **BBBC022** (a Cell Painting chemical screen), so the
   other fluorescence channels exist upstream if multi-channel context ever
   helps. A small fraction overlaps **BBBC038** (Data Science Bowl 2018).
@@ -205,9 +208,12 @@ tqdm.
    field is 2% of the mean. Needs an explicit, documented decision. (Test has
    none, which limits the damage, but validation has one and that is the tuning
    set.)
-3. **Aggregate by mean-over-images or pooled-over-objects?** Pooling weights
-   dense fields more heavily and would hide the sparse-field failures entirely.
-   Leaning mean-over-images, stated explicitly.
+3. **Aggregate by mean-over-images or pooled-over-objects?** Macro-averaging
+   over images keeps sparse-field failures visible but gives each of the ~50
+   images 2% of the score, which is a lot of leverage for a degenerate field.
+   Micro-averaging (pool TP/FP/FN across all images, then compute) handles
+   empties gracefully but lets dense fields dominate. They answer different
+   questions — report both, and name which is the headline.
 4. **Smallest GT nuclei are ~13 px.** Any `min_area` post-filter has to stay
    below that or it silently deletes real objects; check the GT size
    distribution before setting it.

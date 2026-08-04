@@ -36,10 +36,17 @@ If the nuclei counts differ, the mask decoding is wrong — see below.
 
 [BBBC039](https://bbbc.broadinstitute.org/BBBC039): 200 fields of U2OS cells,
 Hoechst-stained, from the Broad Bioimage Benchmark Collection. 16-bit TIFF at
-520 × 696. 23,617 hand-annotated nuclei, ~118 per field. The published
-train/validation/test split of 100/50/50 is grouped by plate, so I use it as
-given rather than re-splitting — a random split would leak plate-level
-illumination and confluence effects across the boundary.
+520 × 696. 23,617 hand-annotated nuclei, ~118 per field. I use the published
+train/validation/test split of 100/50/50 as given rather than re-splitting, so
+the numbers stay comparable to published work on this dataset.
+
+Worth being precise about what that split does and doesn't control for: it is
+**field-level, not plate-level**. I checked the split lists against
+`metadata/filenames_and_plates.csv`, and all 20 BBBC022 plates appear in all
+three splits — no imaging batch is held out. So a test score here measures
+generalization across fields of the same experiment, not across plates,
+microscopes, or staining runs, and it should not be read as evidence the
+pipeline transfers to a new screen.
 
 Two things about the raw data that affect the pipeline: intensities occupy
 roughly 120–4095 rather than the full 16-bit range (120 is the camera floor, not

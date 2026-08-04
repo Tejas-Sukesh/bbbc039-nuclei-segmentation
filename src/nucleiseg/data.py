@@ -72,9 +72,14 @@ def decode_mask(path: str | Path) -> np.ndarray:
 def split_names(split: str) -> list[str]:
     """Image stems belonging to a published split ('training'/'validation'/'test').
 
-    The split files are authoritative and grouped by plate, so honor them
-    rather than re-splitting: a random split would leak plate-level batch
-    effects (illumination, confluence) across train and test.
+    Use these rather than re-splitting, so the numbers stay comparable to
+    published work on this dataset.
+
+    Note what the split does *not* do: it is field-level, not plate-level. All
+    20 BBBC022 plates represented in this dataset appear in all three splits
+    (checked against metadata/filenames_and_plates.csv), so no imaging batch is
+    held out. Test performance therefore measures generalization across fields
+    of the same experiment, not across plates, microscopes, or staining runs.
     """
     if split not in SPLITS:
         raise ValueError(f"split must be one of {SPLITS}, got {split!r}")
