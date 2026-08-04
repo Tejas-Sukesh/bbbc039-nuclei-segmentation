@@ -374,16 +374,21 @@ of the same 24-arm grid over 8 images (192 evaluations) at a 60-pull budget.
 Recorded in [`results/bandit_sweep_validation.json`](results/bandit_sweep_validation.json)
 as `found_optimum: false`.
 
-Two reasons, and both are more interesting than a working bandit. First, the
-premise died with the optimization: FlowCache made the whole grid enumerable in
-1.6 minutes, so there is no evaluation budget left to economize. Second, the noise
-structure is wrong for the tool — per-image AP has a standard deviation near 0.05
-while arm differences are 0.003–0.01, and these bandits sample *(arm, random
-image)* pairs, so at one to three pulls per arm they are measuring which image got
-drawn. The right design here is a paired comparison: score every arm on the same
-images and compare per-image differences, which cancels the between-image variance
-entirely. That is precisely why exhaustive enumeration found the optimum and the
-adaptive samplers did not.
+Two reasons. The first is embarrassing: I killed the premise myself. Bandits exist
+to spend a limited evaluation budget wisely, and FlowCache had already made the
+entire grid enumerable in 1.6 minutes. There was no budget problem left by the
+time I finished building the thing meant to solve it.
+
+The second is the one worth knowing. Per-image AP has a standard deviation near
+0.05, while the arms differ by 0.003–0.01. These bandits sample *(arm, random
+image)* pairs, so at one to three pulls each they are mostly measuring which image
+came up. The fix is a paired design — score every arm on the *same* images and
+compare per-image differences, which cancels the between-image variance outright.
+That is exactly why brute force found the optimum and the adaptive samplers
+didn't.
+
+I'd cut this subsystem if I were starting over. It is the largest piece of code in
+the repo and it contributed one negative result.
 
 **5. Test-time augmentation fixes the merges.** It was the most direct remaining
 shot: averaging over flipped tiles reduces variance in the flow field. The
@@ -441,13 +446,17 @@ false positives           91          120
 AP                    0.8069       0.8090      (intervals overlap)
 ```
 
-**Both main predictions broke.** Small objects did not move at all — 265 to 266 —
-so the out-of-distribution-size explanation is simply wrong; they are not missed
-for want of resolution. And merges, which #5 concluded were a bias that could not
-be reached, dropped by a third, with genuine two-nuclei fusions halving. **Merges
-are substantially a resolution problem.** #5's conclusion was overreach from a
-single intervention: averaging cannot fix them, but that is not the same as
-nothing can.
+**Both main predictions broke**, and I had them backwards. Small objects did not
+move at all — 265 to 266 — so the out-of-distribution-size argument, which I
+thought was the strongest reasoning in the project, is just wrong. They are not
+missed for want of resolution.
+
+Meanwhile merges, which #5 had me confident were a bias nothing could reach,
+dropped by a third, with the genuine two-nuclei fusions halving. So **merges are
+substantially a resolution problem.** #5's conclusion was overreach from a single
+intervention — averaging cannot fix them, which is not the same as nothing can. I
+have left both statements in rather than editing the wrong one out, because the
+sequence is the honest record of what I believed and when.
 
 **10. Faint objects are being drowned out by their bright neighbours.** Since size
 was ruled out, the next candidate was contrast. Comparing missed against found
@@ -513,9 +522,9 @@ the obvious one.
 
 ### The ground truth is not what it looks like
 
-The masks are the one genuinely tricky part of this dataset, and getting them
-wrong produces plausible-looking output while silently destroying the thing being
-measured.
+I got this wrong first. I loaded a mask, saw sensible-looking blobs, and moved on
+to writing metrics. It was only when a field with about 190 nuclei came back with
+three objects in it that I went and looked at the actual pixel values.
 
 They are RGBA PNGs. Green and blue are all-zero, alpha is all-255, and the red
 channel holds **a 3-colour graph colouring rather than instance IDs** —
