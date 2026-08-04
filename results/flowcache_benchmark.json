@@ -1,0 +1,36 @@
+{
+  "device": "mps",
+  "model": "cpsam_v2",
+  "n_images": 3,
+  "repeats_per_image": 3,
+  "uncached_mean_s": 8.793078513999717,
+  "cached_mean_s": 0.10860468066797087,
+  "speedup": 80.96408423576284,
+  "all_label_images_identical": true,
+  "per_image": [
+    {
+      "name": "IXMtest_A02_s1_w1051DAA7C-7042-435F-99F0-1E847D9B42CB",
+      "uncached_s": 11.006851332998849,
+      "cached_s": 0.11440562500138185,
+      "speedup": 96.20900487074742,
+      "n_objects": 108,
+      "identical": true
+    },
+    {
+      "name": "IXMtest_B04_s4_w1F6AEFA0F-AF87-4B3B-A334-698647CFE043",
+      "uncached_s": 7.735027875000014,
+      "cached_s": 0.10654462500133377,
+      "speedup": 72.59894973494143,
+      "n_objects": 97,
+      "identical": true
+    },
+    {
+      "name": "IXMtest_B12_s2_w19F7E0279-D087-4B5E-9899-61971C29CB78",
+      "uncached_s": 7.6373563340002875,
+      "cached_s": 0.104863792001197,
+      "speedup": 72.83120501605653,
+      "n_objects": 114,
+      "identical": true
+    }
+  ]
+}

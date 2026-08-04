@@ -36,5 +36,6 @@
     "min_size": 15,
     "max_size_fraction": 0.4,
     "niter": 200
-  }
+  },
+  "augment": false
 }
