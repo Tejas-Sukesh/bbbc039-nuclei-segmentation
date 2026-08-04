@@ -1,0 +1,54 @@
+{
+  "tag": "failures_validation",
+  "split": "validation",
+  "params": {
+    "cellprob_threshold": 0.0,
+    "flow_threshold": 0.4,
+    "min_size": 15,
+    "max_size_fraction": 0.4,
+    "niter": 200
+  },
+  "missed": {
+    "n_gt_total": 5896,
+    "n_missed": 357,
+    "recall_at_50": 0.9394504748982361,
+    "by_kind": {
+      "undetected": 185,
+      "absorbed": 125,
+      "boundary": 47
+    },
+    "area_median": 20.0,
+    "frac_under_100px": 0.8095238095238095,
+    "frac_under_min_size_15px": 0.2689075630252101,
+    "frac_touching_border": 0.04481792717086835,
+    "intensity_median": 399.57142857142856
+  },
+  "merges": {
+    "n_merges": 103,
+    "n_nuclei_absorbed": 213,
+    "worst_absorbed": 4,
+    "by_kind": {
+      "satellite": 62,
+      "comparable": 24,
+      "mixed": 17
+    },
+    "dominant_area_median": 510.0,
+    "secondary_area_median": 44.5,
+    "secondary_frac_under_100px": 0.6636363636363637
+  },
+  "annotation_ceiling": {
+    "n_objects": 4502,
+    "n_images": 49,
+    "gt_level_median": 0.5528346252008697,
+    "pred_level_median": 0.5327950330802074,
+    "gt_abs_error_median": 0.08313719747597115,
+    "pred_abs_error_median": 0.04494415897651008,
+    "pred_closer_fraction": 0.7298978231896934,
+    "gt_grad_median": 0.27181252225517705,
+    "pred_grad_median": 0.2819122510791082,
+    "pred_sharper_fraction": 0.7883163038649489,
+    "wilcoxon_p_abs_error": 3.8495975443914835e-302,
+    "wilcoxon_p_gradient": 0.0
+  },
+  "annotation_ceiling_verdict": "the prediction sits closer to half-maximum on 73% of 4502 nuclei (median offset 0.045 vs 0.083 of local contrast, Wilcoxon p=3.85e-302)"
+}

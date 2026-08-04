@@ -1,9 +1,17 @@
 # Dataset — downloaded via scripts/download_data.sh, never committed (~80 MB)
 data/
 
-# Outputs
+# Outputs. The bulky per-object dumps are regenerable and stay out, but the
+# summaries and per-image rows the writeup quotes are committed: a number in the
+# README that cannot be checked against the file that produced it is an
+# assertion, not a result.
 results/**
 !results/.gitkeep
+!results/*_summary.json
+!results/*_per_image.csv
+!results/bandit_sweep_*.json
+!results/failures_*_missed_objects.csv
+!results/failures_*_merged_predictions.csv
 
 # Python
 .venv/
