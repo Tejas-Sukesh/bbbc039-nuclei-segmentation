@@ -28,11 +28,9 @@ plus a gradient-boosted classifier trained on the held-out training split, which
 lifts small-object detection precision from 28% to 78% (§12). Twelve hypotheses
 were tested and refuted along the way, each with numbers.
 
-**How to read this.** [SUMMARY.md](SUMMARY.md) is the whole project in one page,
-plain language, ten minutes. For the fifteen-minute version of *this* document,
-read the [Results](#results) table, then [Where it fails](#where-it-fails) §1–§3,
-then [#12](#what-i-tested-and-refuted) — that is the argument end to end. The rest
-is evidence for it.
+**How to read this in fifteen minutes.** The [Results](#results) table, then
+[Where it fails](#where-it-fails) §1–§3, then [#12](#what-i-tested-and-refuted).
+That is the argument end to end; the rest is evidence for it.
 
 Everything below was measured on this machine and is committed alongside the
 numbers in [`results/`](results/), so each figure quoted can be checked against
