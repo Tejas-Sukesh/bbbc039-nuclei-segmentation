@@ -16,11 +16,6 @@ ramp in **47 of 49 fields**. So most of the headline metric is arbitrating a
 sub-pixel placement difference rather than whether the right nucleus was found, and
 no amount of tuning reaches it.
 
-Two earlier versions of this claim were stronger and wrong. The first was an
-artifact of how boundary pixels were sampled; the second leaned on a half-maximum
-statistic whose reference turns out not to exist for these objects — nuclei have no
-intensity plateau. §1 documents both, and what survives them.
-
 > **In plain terms.** Software that draws a line around every cell nucleus in a
 > microscope photo, scored against lines a person drew by hand. It gets a 0.79 out
 > of 1. Most of what it "gets wrong" is not missing cells — it is drawing the line
@@ -33,8 +28,11 @@ plus a gradient-boosted classifier trained on the held-out training split, which
 lifts small-object detection precision from 28% to 78% (§12). Twelve hypotheses
 were tested and refuted along the way, each with numbers.
 
-**Short on time?** [SUMMARY.md](SUMMARY.md) is the whole project in one page, in
-plain language, with no jargon to decode.
+**How to read this.** [SUMMARY.md](SUMMARY.md) is the whole project in one page,
+plain language, ten minutes. For the fifteen-minute version of *this* document,
+read the [Results](#results) table, then [Where it fails](#where-it-fails) §1–§3,
+then [#12](#what-i-tested-and-refuted) — that is the argument end to end. The rest
+is evidence for it.
 
 Everything below was measured on this machine and is committed alongside the
 numbers in [`results/`](results/), so each figure quoted can be checked against
@@ -240,21 +238,14 @@ outline. [`boundary.py`](src/nucleiseg/boundary.py) uses the image, two ways:
 
 ![Annotation ceiling](figures/fig2_annotation_ceiling.png)
 
-**A methodological correction, because it changed the answer.** The first version
-of this measurement sampled `find_boundaries(mask, mode="inner")` — the ring of
-pixels just inside each mask. That ring sits about half a pixel inside the true
-contour, which is the same scale as the effect being measured, and the bias is not
-common-mode: an outline that is slightly too *large* lands its inner ring nearer
-the real edge and therefore scores better. On a synthetic sweep with the ground
-truth placed exactly on half-maximum and the prediction 0.25 px too large, that
-version picks the wrong outline in **9 of 9** configurations, and the gradient
-variant in 7 of 9. Because the model's masks here genuinely are larger than the
-annotation's, the artifact alone could have produced the entire original result —
-which reported the model closer in 48 of 49 fields.
-
-Sampling the marching-squares contour and interpolating along it is correct in
-9 of 9 on the same sweep, for both statistics. Every number below is from the
-corrected version. **The original claim did not survive it.**
+**A note on method.** Boundary pixels are sampled on the marching-squares contour
+and interpolated, not on the ring of pixels inside each mask. The obvious
+implementation is biased in a way larger than the effect being measured — it
+systematically favours whichever outline is larger — and an earlier version of this
+section reported a stronger result because of it. A synthetic test with a known
+answer distinguishes the two: the contour version is correct in 9 of 9
+configurations, the pixel-ring version in 0 of 9. Every number below is from the
+corrected version.
 
 Over 4,502 nuclei in 49 fields, aggregated per field:
 
@@ -467,21 +458,16 @@ of the same 24-arm grid over 8 images (192 evaluations) at a 60-pull budget.
 Recorded in [`results/bandit_sweep_validation.json`](results/bandit_sweep_validation.json)
 as `found_optimum: false`.
 
-Two reasons. The first is embarrassing: I killed the premise myself. Bandits exist
-to spend a limited evaluation budget wisely, and FlowCache had already made the
-entire grid enumerable in 1.6 minutes. There was no budget problem left by the
-time I finished building the thing meant to solve it.
+Two reasons. First, the premise had already gone: FlowCache made the entire grid
+enumerable in 1.6 minutes, so there was no evaluation budget left to economise.
 
-The second is the one worth knowing. Per-image average precision has a standard deviation near
+Second, and more interesting. Per-image average precision has a standard deviation near
 0.05, while the arms differ by 0.003–0.01. These bandits sample *(arm, random
 image)* pairs, so at one to three pulls each they are mostly measuring which image
 came up. The fix is a paired design — score every arm on the *same* images and
 compare per-image differences, which cancels the between-image variance outright.
 That is exactly why brute force found the optimum and the adaptive samplers
 didn't.
-
-I'd cut this subsystem if I were starting over. It is the largest piece of code in
-the repo and it contributed one negative result.
 
 **5. Test-time augmentation fixes the merges.** It was the most direct remaining
 shot: averaging over flipped tiles reduces variance in the flow field. The
@@ -491,8 +477,8 @@ rises, the gain concentrates at intersection-over-union ≥ 0.85, and the merge 
 merge is a *bias* and averaging eight flips of the same biased model reproduces it
 more confidently. All three held: +0.0023 average precision (intervals overlapping), gain at
 strict thresholds +0.0036 against +0.0018 at loose ones, merges 103 → 99. So test-time augmentation
-is not a fix. Note the conclusion I drew from it — that merges are an *unreachable*
-bias — was too strong, and refutation #9 below overturns it.
+is not a fix. The conclusion that merges are therefore *unreachable* was too
+strong; refutation #9 overturns it.
 
 **6. Border-clipped nuclei are a significant failure mode.** Truncated objects
 have small area and off-centre distance maxima, so they were a natural suspect for
@@ -539,17 +525,12 @@ false positives           91          120
 average precision                    0.8069       0.8090      (intervals overlap)
 ```
 
-**Both main predictions broke**, and I had them backwards. Small objects did not
-move at all — 265 to 266 — so the out-of-distribution-size argument, which I
-thought was the strongest reasoning in the project, is just wrong. They are not
-missed for want of resolution.
-
-Meanwhile merges, which #5 had me confident were a bias nothing could reach,
-dropped by a third, with the genuine two-nuclei fusions halving. So **merges are
-substantially a resolution problem.** #5's conclusion was overreach from a single
-intervention — averaging cannot fix them, which is not the same as nothing can. I
-have left both statements in rather than editing the wrong one out, because the
-sequence is the honest record of what I believed and when.
+**Both predictions broke.** Small objects did not move at all — 265 to 266 — so
+they are not missed for want of resolution, and the out-of-distribution-size
+explanation is wrong. Meanwhile merges dropped by a third, with genuine two-nuclei
+fusions halving, so **merges are substantially a resolution problem**. That
+supersedes #5's conclusion: averaging cannot fix them, which is not the same as
+nothing can.
 
 **10. Faint objects are being drowned out by their bright neighbours.** Since size
 was ruled out, the next candidate was contrast. Comparing missed against found
@@ -760,9 +741,9 @@ the obvious one.
 
 ### The ground truth is not what it looks like
 
-I got this wrong first. I loaded a mask, saw sensible-looking blobs, and moved on
-to writing metrics. It was only when a field with about 190 nuclei came back with
-three objects in it that I went and looked at the actual pixel values.
+The masks are the one genuinely tricky part of this dataset, and reading them the
+obvious way produces plausible-looking output while silently destroying the thing
+being measured.
 
 > **In plain terms.** The answer file gives every pixel a number: 0 for
 > background, and 1, 2 or 3 for nuclei. That is every number in the file — four
