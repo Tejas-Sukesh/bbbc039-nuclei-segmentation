@@ -7,18 +7,19 @@ against hand-annotated ground truth, on the 200-field
 **Headline result:** mean AP@[.5:.95] of **0.791** on the held-out test split
 (95% CI [0.766, 0.812]), 95.6% F1 at IoU 0.5.
 
-**The finding that matters more.** 54% of the total shortfall is spent at IoU 0.90
-and 0.95, where "correct" means agreeing with a hand-drawn outline to within about
-half a pixel. At that scale the two outlines differ **systematically** — and two
-defensible definitions of "where the edge is" rank them **oppositely**: the
-half-maximum level favours the annotation in 76% of fields, gradient magnitude
-favours the model in 94%. So a large part of the headline metric is arbitrating a
-sub-pixel *convention*, not whether the model found the right nucleus, and no
-amount of tuning reaches it.
+**The finding that matters more.** Split the shortfall by cause and **63% of it is
+boundary placement on objects the model already found correctly**, against 37% for
+detection. At the strictest thresholds "correct" means matching a hand-drawn
+outline to within about half a pixel, and at that scale the two outlines differ
+systematically: the model's boundary sits on the steeper part of the intensity
+ramp in **47 of 49 fields**. So most of the headline metric is arbitrating a
+sub-pixel placement difference rather than whether the right nucleus was found, and
+no amount of tuning reaches it.
 
-An earlier version of this README made a stronger claim — that the model's outline
-was measurably closer to the true edge. That was an artifact of how boundary pixels
-were sampled, I found it, and §1 documents both the artifact and what survives it.
+Two earlier versions of this claim were stronger and wrong. The first was an
+artifact of how boundary pixels were sampled; the second leaned on a half-maximum
+statistic whose reference turns out not to exist for these objects — nuclei have no
+intensity plateau. §1 documents both, and what survives them.
 
 Everything below was measured on this machine and is committed alongside the
 numbers in [`results/`](results/), so each figure quoted can be checked against
@@ -179,8 +180,25 @@ median-based figure is **~72×**, which is the one I would quote.
 The headline 0.807 is an average of ten numbers, and they are wildly unequal. At
 IoU 0.50 the score is 0.928; at 0.95 it is 0.309. The right panel converts that
 into shares of the total shortfall: **the two strictest thresholds cause 54% of
-the entire gap to a perfect score**, while everything attributable to detection at
-IoU 0.50 accounts for under 4% of it.
+the entire gap to a perfect score.**
+
+Splitting that shortfall by *cause* rather than by threshold needs more care than
+it first appears. The shortfall at IoU 0.50 is 0.072 — those are objects that fail
+even the loosest test, i.e. genuine detection failures. It is tempting to divide
+that by the 1.93 total and call detection 4% of the problem, but that is a
+category error: it compares one threshold's shortfall against a ten-threshold
+total. **A detection failure is a floor — an object that never matches at 0.50
+also fails at every stricter threshold**, so it recurs in all ten terms:
+
+| cause | contribution | share |
+|---|---|---|
+| detection (10 × 0.072, the recurring floor) | 0.721 | **37%** |
+| boundary localisation (the remainder) | 1.210 | **63%** |
+
+So roughly **two thirds** of the gap is boundary placement on objects already
+found correctly, and one third is detection. That is still the finding that
+redirects everything — just not by the factor of ten the naive arithmetic
+suggested.
 
 Mean IoU over matched objects is 0.928. For a median nucleus of 622 px that is
 roughly **half a pixel** of average boundary displacement. So the question is what
@@ -190,12 +208,13 @@ measuring.
 That is a claim about the ground truth, so it needs a referee that is neither
 outline. [`boundary.py`](src/nucleiseg/boundary.py) uses the image, two ways:
 
-- **half-maximum level** — where the outline sits on the brightness ramp, with
-  0.5 being the conventional sub-pixel edge. Needs an estimate of the nucleus
-  interior to calibrate.
 - **gradient magnitude** — how steep the intensity ramp is under the outline.
   Reference-free: the comparison divides both outlines by the same local contrast,
-  so it cancels out entirely.
+  so any calibration error cancels exactly. Well-defined whatever shape the
+  intensity profile has.
+- **half-maximum level** — where the outline sits between the nucleus interior and
+  the background, with 0.5 as the conventional sub-pixel edge. This one turned out
+  **not to be measurable on this data**; see below.
 
 ![Annotation ceiling](figures/fig2_annotation_ceiling.png)
 
@@ -219,40 +238,49 @@ Over 4,502 nuclei in 49 fields, aggregated per field:
 
 | statistic | favours | fields | p |
 |---|---|---|---|
-| half-maximum level | **the annotation** | 37 of 49 (76%) | 0.0036 |
-| gradient magnitude | **the prediction** | 46 of 49 (94%) | 5 × 10⁻¹² |
+| gradient magnitude | **the prediction** | 47 of 49 (96%) | 7 × 10⁻¹² |
+| half-maximum level | *(not measurable — see below)* | — | — |
 
-**The two disagree, and that is the finding.** Not "the annotation is wrong" —
-that claim is dead. What is left is that two reasonable definitions of "where the
-edge is" rank the outlines oppositely, which is itself evidence that the strict
-thresholds are arbitrating a **convention**, not a correctness.
+**Why the level statistic is not evidence, rather than merely uncalibrated.** It
+asks whether `|level − 0.5|` is smaller, which requires 0.5 to be correctly
+located, which requires a "maximum" — a plateau the edge ramp rises to. I assumed
+one existed. So I measured the mean radial intensity profile of real nuclei,
+normalised by each object's own radius:
 
-**Which to weight, and why it is not just picking the convenient one.** The
-gradient comparison is invariant to the interior/background calibration: both
-outlines are divided by the same contrast, so any error in it cancels. The level
-comparison is not — it asks whether `|level − 0.5|` is smaller, which depends
-entirely on 0.5 being correctly located. And on this data it is not: both outlines
-read ~0.39–0.42 rather than ~0.5, almost certainly because the interior reference
-is taken from an eroded core and Hoechst-stained chromatin is denser centrally, so
-the "interior" is brighter than the true plateau. With both values biased low, the
-comparison mechanically favours whichever outline is *smaller* — the mirror of the
-artifact just removed. So the level result is not trustworthy in absolute terms,
-and the gradient result is the one that survives contact with its own assumptions.
+| position (1.0 = centre, 0 = annotated boundary) | relative intensity |
+|---|---|
+| 1.05 | 1.52 |
+| 0.75 | 1.47 |
+| 0.45 | 1.33 |
+| 0.15 | 0.95 |
+| 0.05 | 0.73 |
+| −0.05 | 0.42 |
+| −0.35 | 0.12 |
 
-Read that way: the model's boundary sits on a steeper intensity ramp in 46 of 49
-fields, which is real but weaker than what this section originally claimed, and it
-no longer licenses any statement about the annotation being wrong.
+**There is no plateau.** Intensity declines monotonically from the centre all the
+way out — Hoechst binds DNA and chromatin thins toward the nuclear periphery, so
+"the maximum" depends entirely on how deep you sample. Re-estimating the interior
+from a relative-depth annulus rather than an eroded core moved the numbers by
+0.006, confirming this is not a tuning problem: **the reference does not exist for
+this object class.** Both outlines read ~0.40–0.43 for that reason, and comparing
+those readings to 0.5 mechanically rewards whichever outline is smaller.
+
+So this is **one informative measurement, not two conventions in a standoff.** The
+gradient statistic needs no plateau — it asks only where the ramp is steepest,
+which is well-defined for any profile — and it favours the model's boundary in 47
+of 49 fields. The level statistic is reported here as a method that failed, not as
+a counterweight.
 
 **What this does and does not license.**
 
 - **Not "the labels are wrong."** Retracted. The measurement that appeared to
   support it was an artifact of boundary sampling.
-- **Not a statement about annotator behaviour.** Both outlines now read *below*
-  half-maximum where before they read above, so the earlier "both trace tight"
-  direction reversed under the fix and should be treated as uncalibrated.
+- **Not a statement about annotator behaviour.** The direction reversed under the
+  sampling fix, and the reference it was measured against turns out not to exist.
 - **It does support** that the two outlines differ systematically at sub-pixel
-  scale, and that two defensible edge definitions rank them oppositely — so scores
-  at IoU ≥ 0.90 are not measuring segmentation quality in any stable sense.
+  scale, and that the one well-posed measurement available favours the model's
+  boundary — so scores at IoU ≥ 0.90 are dominated by a sub-pixel placement
+  difference rather than by segmentation quality.
 - **Practical consequence, unchanged:** report F1@0.5 or AP@[.5:.75] on this
   dataset, and treat AP at IoU ≥ 0.90 as a noise floor.
 - **It covers the easy population only** — matched objects above 150 px with

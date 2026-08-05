@@ -39,25 +39,25 @@
   "annotation_ceiling": {
     "n_objects": 4502,
     "n_images": 49,
-    "gt_level_median": 0.4224302597380871,
-    "pred_level_median": 0.3930131004366812,
-    "gt_abs_error_median": 0.08649742067698396,
-    "pred_abs_error_median": 0.10702236228284223,
-    "pred_closer_fraction": 0.41737005775211017,
-    "gt_grad_median": 0.2682720022089472,
-    "pred_grad_median": 0.2747223660267074,
+    "gt_level_median": 0.4276045939294504,
+    "pred_level_median": 0.3990632267122987,
+    "gt_abs_error_median": 0.08317785368729519,
+    "pred_abs_error_median": 0.10104121494651633,
+    "pred_closer_fraction": 0.42292314526876945,
+    "gt_grad_median": 0.2724934884060296,
+    "pred_grad_median": 0.2790049286789856,
     "pred_sharper_fraction": 0.6743669480231008,
     "per_image": {
       "n_images": 49,
-      "gt_abs_error_median": 0.08719074945379715,
-      "pred_abs_error_median": 0.10951526032315978,
-      "pred_closer_fraction": 0.24489795918367346,
-      "pred_sharper_fraction": 0.9387755102040817,
-      "wilcoxon_p_abs_error": 0.0035580797394239028,
-      "wilcoxon_p_gradient": 5.268674385661143e-12
+      "gt_abs_error_median": 0.08303356307557988,
+      "pred_abs_error_median": 0.10286028602860287,
+      "pred_closer_fraction": 0.32653061224489793,
+      "pred_sharper_fraction": 0.9591836734693877,
+      "wilcoxon_p_abs_error": 0.010005901957622854,
+      "wilcoxon_p_gradient": 7.229772336359019e-12
     },
-    "wilcoxon_p_abs_error_uncorrected": 3.067256208115521e-09,
-    "wilcoxon_p_gradient_uncorrected": 1.9228325118092603e-271
+    "wilcoxon_p_abs_error_uncorrected": 2.9049927926377402e-06,
+    "wilcoxon_p_gradient_uncorrected": 7.837651727323858e-271
   },
-  "annotation_ceiling_verdict": "the ground truth sits closer to half-maximum on 58% of 4502 nuclei (median offset 0.086 vs 0.107 of local contrast). Aggregated per field, which is the level at which the observations are independent: 24% of 49 fields, Wilcoxon p=3.56e-03"
+  "annotation_ceiling_verdict": "the two edge definitions disagree, over 49 fields. GRADIENT (reference-free, the one to weight): favours the prediction in 96% of fields, p=7.2e-12. HALF-MAX LEVEL (needs 0.5 correctly located, and it is not here): favours the annotation in 67% of fields, p=1.0e-02. So the strict IoU thresholds arbitrate a convention, not a correctness."
 }

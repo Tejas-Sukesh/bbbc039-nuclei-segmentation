@@ -369,9 +369,12 @@ def annotation_ceiling(fits_csv: Path, out: Path, summary: dict | None = None) -
     ax2.set_ylim(0, 1)
     ax2.yaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
     ax2.set_ylabel(f"share of {n_img} fields", color=C_INK_SOFT)
-    ax2.set_title("The two edge definitions disagree\n"
-                  "which is the finding — not that either side is wrong",
+    ax2.set_title("Only the gradient measure is well-posed\n"
+                  "half-maximum needs a plateau these nuclei do not have",
                   fontsize=11, color=C_INK, loc="left")
+    ax2.annotate("not evidence", xy=(0, 1.0), xytext=(0, 6),
+                 textcoords="offset points", ha="center", fontsize=8.5,
+                 color=C_INK_SOFT, style="italic")
     leg = ax2.legend(frameon=False, fontsize=8.5, loc="lower center",
                      bbox_to_anchor=(0.5, -0.32), ncol=2)
     for t in leg.get_texts():

@@ -8,11 +8,11 @@ annotation is no longer obviously the more accurate of the two outlines, and
 scoring against it stops measuring the model.
 
 That is a claim about the ground truth, so it needs a referee that is neither
-outline. The image is one. A nucleus has a real intensity edge, and the
-conventional sub-pixel definition of its location is the **half-maximum**: the
-level halfway between the object's interior and its local background. So for
-each nucleus we can ask which of the two outlines lands closer to half-maximum,
-and answer without ever consulting the other outline.
+outline. The image is one: a nucleus has a real intensity edge, and we can ask
+which outline sits closer to it without ever consulting the other outline. Two
+ways of asking that were tried here, and only one of them survived -- the
+conventional half-maximum definition needs an intensity plateau that these
+objects turn out not to have.
 
 The comparison is deliberately **paired per object**: interior brightness,
 background level and local contrast all vary hugely between nuclei and between
@@ -21,35 +21,38 @@ that variation. Comparing the two outlines on the *same* nucleus against the
 *same* locally estimated reference cancels all of it -- the same reason the
 exhaustive grid in `grids.py` beat the bandit that sampled random images.
 
-Two statistics come out of it, per matched nucleus, and **they disagree on this
-data** -- which is the actual result. See `_levels` for the sampling bug that had
-to be fixed before either could be believed.
+Two statistics come out of it per matched nucleus, but **only one of them turns
+out to be well-posed on this data**. See `_levels` for the sampling bug that had
+to be fixed before either could be believed at all.
 
 * `grad` -- gradient magnitude along the outline, normalised by local contrast.
   **The one to weight.** The comparison divides both outlines by the *same*
   contrast, so any error in the interior/background estimate cancels exactly. It
-  favours the prediction in 46 of 49 validation fields.
+  favours the prediction in 47 of 49 validation fields.
 * `level` -- boundary intensity mapped onto the interior/background scale, where
-  0.5 is half-maximum. Carries a direction, which makes it diagnostic in
-  principle, but it is only meaningful if 0.5 is correctly located -- and on this
-  data it is not. Both outlines read ~0.39-0.42 rather than ~0.5, almost certainly
-  because the interior reference comes from an eroded core and Hoechst-stained
-  chromatin is denser centrally, so the "interior" exceeds the true plateau. With
-  both values biased low, asking which has smaller `|level - 0.5|` mechanically
-  rewards the *smaller* outline. It favours the annotation in 37 of 49 fields, and
-  that number should not be read as evidence about either outline.
+  0.5 is half-maximum. **Reported as a method that failed, not as a counterweight.**
+  It is only meaningful if 0.5 is correctly located, which requires a plateau the
+  edge ramp rises to. Measuring the mean radial intensity profile of real nuclei
+  shows there isn't one: intensity declines monotonically from the centre outward
+  (1.52 at the core, 1.33 mid-radius, 0.73 at the annotated boundary, relative to
+  the deep interior), because Hoechst binds DNA and chromatin thins toward the
+  periphery. So "the maximum" depends entirely on sampling depth. Re-estimating the
+  interior from a relative-depth annulus rather than an eroded core moved the
+  result by 0.006, confirming this is not a tuning problem -- the reference does
+  not exist for this object class. Both outlines consequently read ~0.40-0.43, and
+  comparing that to 0.5 mechanically rewards the smaller outline.
 
-The honest reading is that two defensible edge definitions rank the outlines
-oppositely, which is itself evidence that the strict IoU thresholds arbitrate a
-convention rather than a correctness.
+So the honest reading is one informative measurement, not two conventions in a
+standoff: the gradient statistic needs no plateau and favours the prediction in
+47 of 49 fields.
 
-What the numbers cannot do is separate annotator imprecision from a genuine
-systematic difference in what a human and a network consider the edge of a
-nucleus. Nobody traced any nucleus in BBBC039 twice, so inter-annotator
-agreement -- the direct measure of human precision -- is not computable on this
-dataset at all. The claim available here is the weaker but still decisive one:
-*whichever outline is closer to the image's own evidence of where the nucleus
-ends.*
+What none of this can do is separate annotator imprecision from a genuine
+difference of opinion about where a nucleus ends. Nobody traced any nucleus in
+BBBC039 twice, so inter-annotator agreement -- the direct measure of human
+precision -- is not computable on this dataset at all. The claim available is
+narrow: *the model's outline sits on the steeper part of the intensity ramp in
+almost every field.* That is a statement about where the two outlines sit, not
+about which is correct.
 """
 
 from __future__ import annotations
@@ -186,9 +189,23 @@ def fit_image(
         if area < MIN_AREA:
             continue
 
-        # Interior reference: pixels both outlines agree are inside, eroded away
-        # from either boundary so neither outline's own error leaks into it.
-        core = ndi.binary_erosion(gt_m & pred_m, core_se)
+        # Interior reference. Not an eroded core: Hoechst-stained chromatin is
+        # denser toward the nuclear centre, so the deep interior reads brighter
+        # than the plateau the edge ramp actually rises to, which biases the
+        # half-maximum level low for both outlines. Instead take an annulus at a
+        # *relative* depth -- normalised distance-to-boundary in [0.30, 0.60] --
+        # which clears the ~1-2 px blur transition without reaching the bright
+        # centre, and adapts to object size. Falls back to erosion when an object
+        # is too small for the band to contain anything.
+        agree = gt_m & pred_m
+        edt = ndi.distance_transform_edt(agree)
+        if edt.max() > 0:
+            rel = edt / edt.max()
+            core = (rel >= 0.30) & (rel <= 0.60)
+            if core.sum() < 20:
+                core = ndi.binary_erosion(agree, core_se)
+        else:
+            core = ndi.binary_erosion(agree, core_se)
         both = gt_m | pred_m
         # Background reference: a ring around the union, minus anything either
         # labelling calls an object -- otherwise a touching neighbour's interior
@@ -309,10 +326,10 @@ def verdict(summary: dict) -> str:
     p_l = img.get("wilcoxon_p_abs_error", float("nan"))
     p_g = img.get("wilcoxon_p_gradient", float("nan"))
     return (
-        f"the two edge definitions disagree, over {n_img} fields. "
-        f"GRADIENT (reference-free, the one to weight): favours the prediction in "
-        f"{grd:.0%} of fields, p={p_g:.1e}. "
-        f"HALF-MAX LEVEL (needs 0.5 correctly located, and it is not here): "
-        f"favours the annotation in {1 - lvl:.0%} of fields, p={p_l:.1e}. "
-        f"So the strict IoU thresholds arbitrate a convention, not a correctness."
+        f"over {n_img} fields. GRADIENT (reference-free, needs no plateau -- the "
+        f"only well-posed measure here): favours the prediction in {grd:.0%} of "
+        f"fields, p={p_g:.1e}. HALF-MAX LEVEL: favours the annotation in "
+        f"{1 - lvl:.0%} of fields (p={p_l:.1e}), but these nuclei have no intensity "
+        f"plateau, so 0.5 is not locatable and this is NOT evidence -- see the "
+        f"module docstring."
     )
