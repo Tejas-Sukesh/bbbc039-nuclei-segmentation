@@ -800,16 +800,19 @@ cannot separate annotator imprecision from a genuine disagreement about where a
 nucleus ends. Re-tracing even 20 nuclei twice would give a real inter-annotator
 agreement number and convert the ceiling from an inference into a measurement.
 
-**3. Fine-tune, but for the diagnosis, not the score.** `train_seg` on the 100
-training fields would likely improve AP — and that is the problem. Given §1, a
-fine-tuned model would gain partly by learning the annotator's systematic
-tightness, improving the metric while making the segmentation objectively no
-better. That makes it a *test of the ceiling claim* rather than an improvement:
-if the gain concentrates at IoU ≥ 0.90 and the fine-tuned boundaries move
-*away* from half-maximum, the ceiling argument is confirmed in the most direct
-way available. Skipped here because MPS training time was unmeasured against a
-hard deadline, and a probe that cannot distinguish "won't converge" from "needs
-another 15 minutes" produces sunk cost rather than a decision.
+**3. Fine-tune on the 20-100 px band.** Skipped here for a practical reason first:
+MPS training time was unmeasured against a hard deadline, and a timeboxed probe
+cannot distinguish "will not converge" from "needs another fifteen minutes," so it
+produces sunk cost rather than a decision.
+
+There is also a reason to be careful about how it is judged. Given §1, a fine-tune
+would gain partly by learning this annotator's systematic tightness — improving the
+metric while making the segmentation no better. That makes it a useful *test* of
+the ceiling claim as well as an improvement: if the gain concentrates at IoU ≥ 0.90
+and the fine-tuned boundaries move away from the image's own edge, the ceiling
+argument is confirmed directly. Target the 20-100 px objects, which are faint but
+real, and judge that band on detection counts rather than IoU — otherwise the
+geometry in §12 will hide whatever it achieves.
 
 **4. A genuinely different backbone.** `cpdino` swaps SAM for DINOv3 and is
 available in the installed Cellpose. Its errors should be the least correlated
@@ -867,8 +870,6 @@ src/nucleiseg/
 scripts/
   01_cache_flows.py         precompute and cache network output
   02_bandit_sweep.py        bandits vs exhaustive enumeration
-  03_contextual_bandit.py   LinUCB per-image policy + oracle bound  [unrun]
-  04_final_eval.py          multi-method test comparison            [unrun]
   05_failure_analysis.py    error inventory + annotation ceiling
   06_figures.py             every figure, rendered from results/
   07_tta_comparison.py      TTA before/after with a registered prediction
@@ -883,11 +884,6 @@ figures/          the figures embedded above
 RESOURCES.md      annotated reading list, marked verified vs. not
 ```
 
-Scripts 03 and 04 are implemented but were not run: the oracle bound in 03 became
-moot once the cheap parameter space was shown flat (refutations #1–3 leave nothing
-for a per-image policy to choose between), and 07 supersedes 04 for the
-comparison actually reported. They are left in place rather than deleted because
-the design reasoning in their docstrings is part of the record.
 
 ## Limitations
 
