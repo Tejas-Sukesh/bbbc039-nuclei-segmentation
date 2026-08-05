@@ -21,6 +21,11 @@ artifact of how boundary pixels were sampled; the second leaned on a half-maximu
 statistic whose reference turns out not to exist for these objects — nuclei have no
 intensity plateau. §1 documents both, and what survives them.
 
+> **In plain terms.** Software that draws a line around every cell nucleus in a
+> microscope photo, scored against lines a person drew by hand. It gets a 0.79 out
+> of 1. Most of what it "gets wrong" is not missing cells — it is drawing the line
+> a fraction of a pixel away from where the human drew it.
+
 **What I built and trained.** A correct decoder for the ground truth (§the dataset
 trap), a from-scratch classical pipeline, a 72× evaluation cache, and a
 **two-stage detector for the objects Cellpose misses** — a residual proposal step
@@ -150,6 +155,11 @@ nearest thing here to an accuracy result.
 bit-identical output.** Measured by
 [`scripts/08_flowcache_benchmark.py`](scripts/08_flowcache_benchmark.py), saved
 to [`results/flowcache_benchmark.json`](results/flowcache_benchmark.json).
+
+> **In plain terms.** Testing one setting took 9 seconds per image, so trying
+> them all would take hours. But the slow part — the neural network — does not
+> depend on the settings at all. So run it once per image, save the result, and
+> re-run only the fast part. 9 seconds becomes 0.11.
 
 Cellpose-SAM inference costs ~9 s per field on Apple Silicon Metal Performance Shaders, which makes any
 parameter search impractical — the 18-arm grid over 50 validation images is 900
@@ -302,6 +312,9 @@ a counterweight.
 
 ![What gets missed](figures/fig3_what_gets_missed.png)
 
+> **In plain terms.** The cells it misses are all the same kind of thing: small
+> and faint. It finds 98% of bright nuclei and 86% of dim ones.
+
 Recall at intersection-over-union 0.5 is 93.9% — 357 of 5,896 nuclei missed.
 [`failures.py`](src/nucleiseg/failures.py) classifies each by mechanism, since a
 nucleus absorbed into a neighbour and one never detected cost the same in average precision but
@@ -345,6 +358,11 @@ explanation for that and rules it out.
 ### 3. What the merges actually fuse — and why the obvious fix would fail
 
 ![Merges](figures/fig4_merges.png)
+
+> **In plain terms.** The metric says the model glued 103 pairs of cells together.
+> Look at what it actually glued and 60% are a normal nucleus plus a tiny speck
+> that the human marked as its own cell. That is a disagreement about what counts
+> as a cell, not a failure to separate two of them.
 
 103 predictions each cover two or more annotated nuclei. The natural reading is
 the textbook one: touching nuclei whose flow fields converge on a single centre.
@@ -629,6 +647,12 @@ sub-population, though not on the 20–100 px band where objects are faint but r
 model trained from scratch here, and the result that unifies the two halves of
 this writeup.
 
+> **In plain terms.** Erase every nucleus the model *did* find, painting it over
+> with plain background. Now look again. The faint specks it missed used to be
+> competing with 118 bright nuclei; now they are the brightest things in the
+> picture. Same objects, far easier problem. A simple detector circles anything
+> speck-shaped, and a model I trained decides which circles are real.
+
 The residual detector (#11) proposes candidates at 28% precision, and hand-tuning
 its gates cannot do better — no single threshold on any one cue separates the
 classes. So: propose generously, describe each candidate with eleven features
@@ -662,6 +686,12 @@ were 41% of true area, because a half-height cut on a faint blurred object lands
 well inside the annotation. Sweeping that cut from 0.50 to 0.20 roughly triples the
 hit rate (13% → 40%) and then plateaus, which recovered two-thirds of the loss but
 not all of it.
+
+> **In plain terms.** It finds them in the right places but draws them slightly
+> too small, and "slightly too small" is scored as two mistakes: the human's cell
+> counts as missed, and yours counts as a false alarm. Being nearly right is
+> punished harder than not trying. And you cannot fix it by drawing bigger,
+> because of the geometry below.
 
 **Why it plateaus is the point.** For a round object, intersection-over-union ≥ 0.5 requires the two
 radii to agree within 17%:
@@ -731,6 +761,14 @@ I got this wrong first. I loaded a mask, saw sensible-looking blobs, and moved o
 to writing metrics. It was only when a field with about 190 nuclei came back with
 three objects in it that I went and looked at the actual pixel values.
 
+> **In plain terms.** The answer file gives every pixel a number: 0 for
+> background, and 1, 2 or 3 for nuclei. That is every number in the file — four
+> values for 190 nuclei. They are not identity numbers, they are colours, assigned
+> so two nuclei that touch never share one. Like colouring a map so no bordering
+> countries match. Read it the obvious way and every touching pair of nuclei melts
+> into one blob — and your score goes *up*, because the hardest cases quietly
+> vanish from the test.
+
 They are RGBA PNGs. Green and blue are all-zero, alpha is all-255, and the red
 channel holds **a 3-colour graph colouring rather than instance IDs** —
 background is 0, and every nucleus gets a colour in 1–3, assigned only so that
@@ -758,6 +796,11 @@ hazard in any per-image metric.
 
 Decided once, in [`metrics.py`](src/nucleiseg/metrics.py), and held fixed so
 results stay comparable.
+
+> **In plain terms.** The score is not one measurement. You have to decide how
+> much your outline must overlap the human's to count as correct, so the field's
+> convention is to not pick one — try ten increasingly strict levels and average
+> them. At the easiest level this model gets 93% right; at the hardest, 31%.
 
 - **Headline:** mean average precision over intersection-over-union 0.50:0.05:0.95, the the 2018 Data Science Bowl convention. Note
   this "average precision" is `true positives / (true positives + false positives + false negatives)` per threshold — a Jaccard-style ratio over
