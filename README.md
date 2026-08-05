@@ -9,16 +9,16 @@ against hand-annotated ground truth, on the 200-field
 
 **The finding that matters more.** 54% of the total shortfall is spent at IoU 0.90
 and 0.95, where "correct" means agreeing with a hand-drawn outline to within about
-half a pixel. At that scale the two outlines differ **systematically**: measured
-against the image's own intensity edge, **the model's boundary is the closer of
-the two in 48 of 49 fields**, with an independent gradient-based check agreeing in
-the same 48.
+half a pixel. At that scale the two outlines differ **systematically** — and two
+defensible definitions of "where the edge is" rank them **oppositely**: the
+half-maximum level favours the annotation in 76% of fields, gradient magnitude
+favours the model in 94%. So a large part of the headline metric is arbitrating a
+sub-pixel *convention*, not whether the model found the right nucleus, and no
+amount of tuning reaches it.
 
-So a large part of the headline metric is arbitrating a sub-pixel difference in
-*where to place a boundary on a blurred edge* — a question of annotation
-convention — rather than whether the model found the right nucleus. That holds
-regardless of which outline one considers correct, and no amount of tuning
-reaches it. Section 1 states precisely what this does and does not license.
+An earlier version of this README made a stronger claim — that the model's outline
+was measurably closer to the true edge. That was an artifact of how boundary pixels
+were sampled, I found it, and §1 documents both the artifact and what survives it.
 
 Everything below was measured on this machine and is committed alongside the
 numbers in [`results/`](results/), so each figure quoted can be checked against
@@ -172,87 +172,94 @@ median-based figure is **~72×**, which is the one I would quote.
 
 ## Where it fails
 
-### 1. The metric's strict end is measuring the annotation, not the model
+### 1. The metric's strict end measures a sub-pixel convention difference
 
 ![Where the score is lost](figures/fig1_where_the_score_is_lost.png)
 
 The headline 0.807 is an average of ten numbers, and they are wildly unequal. At
 IoU 0.50 the score is 0.928; at 0.95 it is 0.309. The right panel converts that
 into shares of the total shortfall: **the two strictest thresholds cause 54% of
-the entire gap to a perfect score**, while everything attributable to detection
-at IoU 0.50 — every missed nucleus, every merge, the whole count bias — accounts
-for under 4% of it.
+the entire gap to a perfect score**, while everything attributable to detection at
+IoU 0.50 accounts for under 4% of it.
 
-Mean IoU over matched objects is 0.928. For a median nucleus of 622 px that works
-out to roughly **half a pixel** of average boundary displacement. So the question
-is whether a hand-drawn outline is even accurate to half a pixel, and if not,
-what the strict thresholds are actually measuring.
+Mean IoU over matched objects is 0.928. For a median nucleus of 622 px that is
+roughly **half a pixel** of average boundary displacement. So the question is what
+a threshold demanding sub-pixel agreement with a hand tracing is actually
+measuring.
 
 That is a claim about the ground truth, so it needs a referee that is neither
-outline. The image is one. A nucleus has a real intensity edge, and its
-conventional sub-pixel location is the **half-maximum**: the level halfway
-between the object's interior and its local background. For each nucleus,
-[`boundary.py`](src/nucleiseg/boundary.py) estimates that reference locally and
-asks which outline lands closer — never consulting the other outline. The
-comparison is paired per object, because contrast varies far more between nuclei
-than the effect being measured, and pooled distributions would drown it.
+outline. [`boundary.py`](src/nucleiseg/boundary.py) uses the image, two ways:
+
+- **half-maximum level** — where the outline sits on the brightness ramp, with
+  0.5 being the conventional sub-pixel edge. Needs an estimate of the nucleus
+  interior to calibrate.
+- **gradient magnitude** — how steep the intensity ramp is under the outline.
+  Reference-free: the comparison divides both outlines by the same local contrast,
+  so it cancels out entirely.
 
 ![Annotation ceiling](figures/fig2_annotation_ceiling.png)
 
-On 4,502 nuclei across 49 fields:
+**A methodological correction, because it changed the answer.** The first version
+of this measurement sampled `find_boundaries(mask, mode="inner")` — the ring of
+pixels just inside each mask. That ring sits about half a pixel inside the true
+contour, which is the same scale as the effect being measured, and the bias is not
+common-mode: an outline that is slightly too *large* lands its inner ring nearer
+the real edge and therefore scores better. On a synthetic sweep with the ground
+truth placed exactly on half-maximum and the prediction 0.25 px too large, that
+version picks the wrong outline in **9 of 9** configurations, and the gradient
+variant in 7 of 9. Because the model's masks here genuinely are larger than the
+annotation's, the artifact alone could have produced the entire original result —
+which reported the model closer in 48 of 49 fields.
 
-| | hand-drawn ground truth | model prediction |
-|---|---|---|
-| Median distance from the true edge | 0.083 | **0.045** |
-| Closer to the true edge | 27% of nuclei | **73%** |
-| Sits on the steeper intensity gradient | 21% | **79%** |
+Sampling the marching-squares contour and interpolating along it is correct in
+9 of 9 on the same sweep, for both statistics. Every number below is from the
+corrected version. **The original claim did not survive it.**
 
-Both outlines trace slightly *tight* — inside the true edge — but the human
-traces tighter, by roughly a factor of two.
+Over 4,502 nuclei in 49 fields, aggregated per field:
 
-**The significance test is done per field, not per object.** Nuclei within one
-image share focus, exposure and staining, so they are not independent
-observations, and a signed-rank test over 4,502 of them would overstate its
-p-value by many orders of magnitude. Reducing each field to its median offset and
-comparing those 49 paired values instead: **the model's outline is closer in 48 of
-49 fields**, Wilcoxon p ≈ 7 × 10⁻¹⁵, with the gradient check agreeing in the same
-48. Consistency across nearly every independent field is the more convincing
-statement anyway.
+| statistic | favours | fields | p |
+|---|---|---|---|
+| half-maximum level | **the annotation** | 37 of 49 (76%) | 0.0036 |
+| gradient magnitude | **the prediction** | 46 of 49 (94%) | 5 × 10⁻¹² |
 
-**So a large part of the reported error is a ceiling, not a defect.** At the
-strict thresholds the metric is adjudicating a systematic sub-pixel difference in
-*where a boundary belongs on a blurred edge*, and no amount of tuning,
-augmenting, or fine-tuning reaches it. The practical consequence: on this
-dataset, AP at IoU ≥ 0.90 should be read as a noise floor, and F1@0.5 or
-AP@[.5:.75] is the informative range.
+**The two disagree, and that is the finding.** Not "the annotation is wrong" —
+that claim is dead. What is left is that two reasonable definitions of "where the
+edge is" rank the outlines oppositely, which is itself evidence that the strict
+thresholds are arbitrating a **convention**, not a correctness.
 
-**Be precise about what this licenses.** The measurement is solid — paired, 4,502
-nuclei across 49 fields, two independent methods agreeing. The *interpretation* is
-narrower than it first appears, in four ways:
+**Which to weight, and why it is not just picking the convenient one.** The
+gradient comparison is invariant to the interior/background calibration: both
+outlines are divided by the same contrast, so any error in it cancels. The level
+comparison is not — it asks whether `|level − 0.5|` is smaller, which depends
+entirely on 0.5 being correctly located. And on this data it is not: both outlines
+read ~0.39–0.42 rather than ~0.5, almost certainly because the interior reference
+is taken from an eroded core and Hoechst-stained chromatin is denser centrally, so
+the "interior" is brighter than the true plateau. With both values biased low, the
+comparison mechanically favours whichever outline is *smaller* — the mirror of the
+artifact just removed. So the level result is not trustworthy in absolute terms,
+and the gradient result is the one that survives contact with its own assumptions.
 
-- **The absolute direction is partly a sampling artifact; the comparison is not.**
-  Boundary pixels are sampled with `find_boundaries(mode="inner")`, i.e. the
-  outermost pixels *inside* each mask, which sits roughly half a pixel inside the
-  true contour — the same scale as the effect being measured. Both outlines are
-  sampled identically, so the paired result (the model is closer in 48 of 49
-  fields) is unaffected. But the claim that *both* outlines trace tight, in
-  absolute terms, is partly an artifact of where the sampling ring falls, and
-  should not be read as a physical finding about annotator behaviour.
-- **Half-maximum is a convention, not ground truth.** It is the standard
-  sub-pixel definition for a blurred edge, but an annotator might trace tight
-  deliberately, to exclude a diffraction halo. So the defensible claim is "the
-  model's boundary agrees with the image's intensity edge more often," not "the
-  annotation is wrong."
-- **This says nothing about *why* the outlines differ.** Annotator imprecision
-  and a genuine human/network disagreement about where a nucleus ends are not
-  separable here, because nobody traced any nucleus in BBBC039 twice —
-  inter-annotator agreement, the direct measure of human precision, is not
-  computable on this dataset at all.
-- **It covers the easy population only.** Matched objects above 150 px with
-  adequate local contrast, excluding the field edge — 4,502 of 5,896 nuclei. It
-  deliberately excludes the small objects that dominate §2, whose boundary
-  statistics are unreliable. §1 and §2 are two separate findings that happen to
-  sit next to each other, not one.
+Read that way: the model's boundary sits on a steeper intensity ramp in 46 of 49
+fields, which is real but weaker than what this section originally claimed, and it
+no longer licenses any statement about the annotation being wrong.
+
+**What this does and does not license.**
+
+- **Not "the labels are wrong."** Retracted. The measurement that appeared to
+  support it was an artifact of boundary sampling.
+- **Not a statement about annotator behaviour.** Both outlines now read *below*
+  half-maximum where before they read above, so the earlier "both trace tight"
+  direction reversed under the fix and should be treated as uncalibrated.
+- **It does support** that the two outlines differ systematically at sub-pixel
+  scale, and that two defensible edge definitions rank them oppositely — so scores
+  at IoU ≥ 0.90 are not measuring segmentation quality in any stable sense.
+- **Practical consequence, unchanged:** report F1@0.5 or AP@[.5:.75] on this
+  dataset, and treat AP at IoU ≥ 0.90 as a noise floor.
+- **It covers the easy population only** — matched objects above 150 px with
+  adequate contrast, off the field edge: 4,502 of 5,896. It excludes exactly the
+  small objects that dominate §2. §1 and §2 are separate findings.
+- **Human precision is still unmeasurable here.** Nothing in BBBC039 was traced
+  twice, so inter-annotator agreement cannot be computed at all.
 
 ### 2. What actually gets missed: one population of very small objects
 

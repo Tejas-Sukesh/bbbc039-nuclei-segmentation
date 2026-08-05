@@ -335,10 +335,10 @@ def annotation_ceiling(fits_csv: Path, out: Path, summary: dict | None = None) -
     ax1.annotate("true edge\n(half-maximum)", xy=(0.5, ax1.get_ylim()[1] * 0.97),
                  xytext=(8, -4), textcoords="offset points", fontsize=9,
                  color=C_INK, va="top")
-    ax1.set_xlabel("where the outline sits  (0.5 = the image's own edge;"
-                   " higher = traced too tight)", color=C_INK_SOFT)
+    ax1.set_xlabel("where the outline sits on the brightness ramp"
+                   "  (0.5 = half-maximum)", color=C_INK_SOFT)
     ax1.set_ylabel("nuclei", color=C_INK_SOFT)
-    ax1.set_title(f"Both outlines trace slightly tight, the human more so"
+    ax1.set_title(f"Both outlines read below half-maximum, the model further"
                   f"  (n={len(gt)} nuclei)", fontsize=11, color=C_INK, loc="left")
     # Upper left: the sparse tail of both distributions, and the only corner the
     # "true edge" annotation at x=0.5 cannot collide with.
@@ -346,20 +346,36 @@ def annotation_ceiling(fits_csv: Path, out: Path, summary: dict | None = None) -
     for t in leg.get_texts():
         t.set_color(C_INK)
 
-    err = np.array([np.abs(gt - 0.5), np.abs(pr - 0.5)])
-    med = np.median(err, axis=1)
-    bars = ax2.bar(["hand-drawn\nground truth", "model\nprediction"], med,
-                   width=0.5, color=[C_GT, C_PRED], zorder=3)
-    for b, v in zip(bars, med):
-        ax2.annotate(f"{v:.3f}", xy=(b.get_x() + b.get_width() / 2, v),
-                     xytext=(0, 4), textcoords="offset points", ha="center",
-                     fontsize=10, color=C_INK, fontweight="bold")
-    ax2.set_ylabel("median distance from the true edge\n(fraction of local contrast)",
-                   color=C_INK_SOFT)
-    won = summary.get("pred_closer_fraction") if summary else None
-    sub = f"the model is closer on {won:.0%} of nuclei" if won else "lower is better"
-    ax2.set_title(f"Whose outline is right?\n{sub}", fontsize=11, color=C_INK, loc="left")
-    ax2.set_ylim(0, max(med) * 1.35)
+    # The right panel is the result: two defensible edge definitions rank the two
+    # outlines oppositely. A single "who won" bar would hide exactly that.
+    img = (summary or {}).get("per_image", {})
+    lvl_pred = img.get("pred_closer_fraction", float("nan"))
+    grd_pred = img.get("pred_sharper_fraction", float("nan"))
+    n_img = img.get("n_images", 0)
+    labels = ["half-maximum\nlevel", "gradient\nmagnitude"]
+    pred_share = np.array([lvl_pred, grd_pred])
+    gt_share = 1.0 - pred_share
+    x = np.arange(len(labels))
+    ax2.bar(x, gt_share, width=0.55, color=C_GT, zorder=3, label="favours ground truth")
+    ax2.bar(x, pred_share, width=0.55, bottom=gt_share, color=C_PRED, zorder=3,
+            label="favours prediction")
+    for i, (g, p) in enumerate(zip(gt_share, pred_share)):
+        ax2.annotate(f"{g:.0%}", xy=(i, g / 2), ha="center", va="center",
+                     fontsize=11, color="white", fontweight="bold")
+        ax2.annotate(f"{p:.0%}", xy=(i, g + p / 2), ha="center", va="center",
+                     fontsize=11, color="white", fontweight="bold")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels, fontsize=9.5)
+    ax2.set_ylim(0, 1)
+    ax2.yaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
+    ax2.set_ylabel(f"share of {n_img} fields", color=C_INK_SOFT)
+    ax2.set_title("The two edge definitions disagree\n"
+                  "which is the finding — not that either side is wrong",
+                  fontsize=11, color=C_INK, loc="left")
+    leg = ax2.legend(frameon=False, fontsize=8.5, loc="lower center",
+                     bbox_to_anchor=(0.5, -0.32), ncol=2)
+    for t in leg.get_texts():
+        t.set_color(C_INK)
     return _save(fig, out)
 
 

@@ -21,16 +21,27 @@ that variation. Comparing the two outlines on the *same* nucleus against the
 *same* locally estimated reference cancels all of it -- the same reason the
 exhaustive grid in `grids.py` beat the bandit that sampled random images.
 
-Two statistics come out of it, per matched nucleus:
+Two statistics come out of it, per matched nucleus, and **they disagree on this
+data** -- which is the actual result. See `_levels` for the sampling bug that had
+to be fixed before either could be believed.
 
-* `level` -- boundary intensity mapped onto the interior/background scale, so
-  0.5 is exactly half-maximum. Above 0.5 the outline sits *inside* the true
-  edge (traced tight); below 0.5 it sits *outside* (traced loose). This carries
-  a direction, which is what makes it diagnostic rather than merely a score.
 * `grad` -- gradient magnitude along the outline, normalised by local contrast.
-  The steepest-descent definition of an edge rather than the half-maximum one;
-  reported as an independent check that does not share the first one's
-  assumption of a symmetric intensity profile.
+  **The one to weight.** The comparison divides both outlines by the *same*
+  contrast, so any error in the interior/background estimate cancels exactly. It
+  favours the prediction in 46 of 49 validation fields.
+* `level` -- boundary intensity mapped onto the interior/background scale, where
+  0.5 is half-maximum. Carries a direction, which makes it diagnostic in
+  principle, but it is only meaningful if 0.5 is correctly located -- and on this
+  data it is not. Both outlines read ~0.39-0.42 rather than ~0.5, almost certainly
+  because the interior reference comes from an eroded core and Hoechst-stained
+  chromatin is denser centrally, so the "interior" exceeds the true plateau. With
+  both values biased low, asking which has smaller `|level - 0.5|` mechanically
+  rewards the *smaller* outline. It favours the annotation in 37 of 49 fields, and
+  that number should not be read as evidence about either outline.
+
+The honest reading is that two defensible edge definitions rank the outlines
+oppositely, which is itself evidence that the strict IoU thresholds arbitrate a
+convention rather than a correctness.
 
 What the numbers cannot do is separate annotator imprecision from a genuine
 systematic difference in what a human and a network consider the edge of a
@@ -48,7 +59,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import sobel
-from skimage.segmentation import find_boundaries
+from skimage.measure import find_contours
 
 from . import metrics as M
 
@@ -96,12 +107,43 @@ def _disk(radius: int) -> np.ndarray:
 def _levels(
     image: np.ndarray, mask: np.ndarray, grad: np.ndarray, i_bg: float, contrast: float
 ) -> tuple[float, float]:
-    """Median boundary intensity (on the half-max scale) and normalised gradient."""
-    edge = find_boundaries(mask, mode="inner")
-    if not edge.any():
+    """Median boundary intensity (on the half-max scale) and normalised gradient.
+
+    **Sampled on the sub-pixel contour, not on the ring of pixels inside the
+    mask.** The obvious implementation -- `find_boundaries(mask, mode="inner")` --
+    is badly biased for this measurement, and the bias is larger than the effect.
+
+    That ring sits roughly half a pixel *inside* the true contour, so on a blurred
+    edge it reads brighter than half-maximum: a perfectly placed outline registers
+    ~0.64 rather than 0.50 at typical blur. Worse, the bias is not common-mode
+    between the two outlines being compared. An outline that is slightly too
+    *large* has its inner ring land nearer the real edge, so it scores better --
+    which means the statistic systematically rewards over-large masks. On a
+    synthetic sweep where the ground truth sits exactly on half-maximum and the
+    prediction is 0.25 px too large, the inner-ring version picks the wrong
+    outline in 9 of 9 configurations, and the gradient variant in 7 of 9. Since
+    the model's masks here *are* systematically larger than the annotation's, that
+    artifact alone could manufacture the entire result.
+
+    Marching squares gives the contour at the 0.5 level of the binary mask --
+    the actual rasterised boundary, between the last inside pixel and the first
+    outside one -- and `map_coordinates` samples the image along it with bilinear
+    interpolation. On the same sweep this version is correct in 9 of 9, for both
+    statistics, and a perfectly placed outline registers ~0.49.
+    """
+    contours = find_contours(np.ascontiguousarray(mask, dtype=np.float64), 0.5)
+    if not contours:
         return float("nan"), float("nan")
-    level = (float(np.median(image[edge])) - i_bg) / contrast
-    return level, float(np.median(grad[edge])) / contrast
+    # Longest contour: the object's outer boundary, ignoring any interior holes.
+    coords = max(contours, key=len).T
+    img_vals = ndi.map_coordinates(image.astype(np.float64), coords, order=1,
+                                   mode="nearest")
+    grad_vals = ndi.map_coordinates(grad.astype(np.float64), coords, order=1,
+                                    mode="nearest")
+    if img_vals.size == 0:
+        return float("nan"), float("nan")
+    level = (float(np.median(img_vals)) - i_bg) / contrast
+    return level, float(np.median(grad_vals)) / contrast
 
 
 def fit_image(
@@ -261,15 +303,16 @@ def verdict(summary: dict) -> str:
     gt_e, pr_e = summary["gt_abs_error_median"], summary["pred_abs_error_median"]
     frac = summary["pred_closer_fraction"]
     img = summary.get("per_image", {})
-    p = img.get("wilcoxon_p_abs_error", float("nan"))
     n_img = img.get("n_images", 0)
-    img_frac = img.get("pred_closer_fraction", float("nan"))
-    who = "the prediction" if pr_e < gt_e else "the ground truth"
+    lvl = img.get("pred_closer_fraction", float("nan"))
+    grd = img.get("pred_sharper_fraction", float("nan"))
+    p_l = img.get("wilcoxon_p_abs_error", float("nan"))
+    p_g = img.get("wilcoxon_p_gradient", float("nan"))
     return (
-        f"{who} sits closer to half-maximum on {max(frac, 1 - frac):.0%} of "
-        f"{summary['n_objects']} nuclei "
-        f"(median offset {min(pr_e, gt_e):.3f} vs {max(pr_e, gt_e):.3f} of local "
-        f"contrast). Aggregated per field, which is the level at which the "
-        f"observations are independent: {img_frac:.0%} of {n_img} fields, "
-        f"Wilcoxon p={p:.2e}"
+        f"the two edge definitions disagree, over {n_img} fields. "
+        f"GRADIENT (reference-free, the one to weight): favours the prediction in "
+        f"{grd:.0%} of fields, p={p_g:.1e}. "
+        f"HALF-MAX LEVEL (needs 0.5 correctly located, and it is not here): "
+        f"favours the annotation in {1 - lvl:.0%} of fields, p={p_l:.1e}. "
+        f"So the strict IoU thresholds arbitrate a convention, not a correctness."
     )

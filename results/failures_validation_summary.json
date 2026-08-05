@@ -39,25 +39,25 @@
   "annotation_ceiling": {
     "n_objects": 4502,
     "n_images": 49,
-    "gt_level_median": 0.5528346252008697,
-    "pred_level_median": 0.5327950330802074,
-    "gt_abs_error_median": 0.08313719747597115,
-    "pred_abs_error_median": 0.04494415897651008,
-    "pred_closer_fraction": 0.7298978231896934,
-    "gt_grad_median": 0.27181252225517705,
-    "pred_grad_median": 0.2819122510791082,
-    "pred_sharper_fraction": 0.7883163038649489,
+    "gt_level_median": 0.4224302597380871,
+    "pred_level_median": 0.3930131004366812,
+    "gt_abs_error_median": 0.08649742067698396,
+    "pred_abs_error_median": 0.10702236228284223,
+    "pred_closer_fraction": 0.41737005775211017,
+    "gt_grad_median": 0.2682720022089472,
+    "pred_grad_median": 0.2747223660267074,
+    "pred_sharper_fraction": 0.6743669480231008,
     "per_image": {
       "n_images": 49,
-      "gt_abs_error_median": 0.07734598979092366,
-      "pred_abs_error_median": 0.04411118194007871,
-      "pred_closer_fraction": 0.9795918367346939,
-      "pred_sharper_fraction": 0.9795918367346939,
-      "wilcoxon_p_abs_error": 7.105427357601002e-15,
-      "wilcoxon_p_gradient": 7.105427357601002e-15
+      "gt_abs_error_median": 0.08719074945379715,
+      "pred_abs_error_median": 0.10951526032315978,
+      "pred_closer_fraction": 0.24489795918367346,
+      "pred_sharper_fraction": 0.9387755102040817,
+      "wilcoxon_p_abs_error": 0.0035580797394239028,
+      "wilcoxon_p_gradient": 5.268674385661143e-12
     },
-    "wilcoxon_p_abs_error_uncorrected": 3.8495975443914835e-302,
-    "wilcoxon_p_gradient_uncorrected": 0.0
+    "wilcoxon_p_abs_error_uncorrected": 3.067256208115521e-09,
+    "wilcoxon_p_gradient_uncorrected": 1.9228325118092603e-271
   },
-  "annotation_ceiling_verdict": "the prediction sits closer to half-maximum on 73% of 4502 nuclei (median offset 0.045 vs 0.083 of local contrast). Aggregated per field, which is the level at which the observations are independent: 98% of 49 fields, Wilcoxon p=7.11e-15"
+  "annotation_ceiling_verdict": "the ground truth sits closer to half-maximum on 58% of 4502 nuclei (median offset 0.086 vs 0.107 of local contrast). Aggregated per field, which is the level at which the observations are independent: 24% of 49 fields, Wilcoxon p=3.56e-03"
 }
