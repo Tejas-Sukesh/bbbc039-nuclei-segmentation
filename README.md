@@ -4,8 +4,8 @@ Segments individual nuclei from fluorescence microscopy images and scores itself
 against hand-annotated ground truth, on the 200-field
 [BBBC039](https://bbbc.broadinstitute.org/BBBC039) benchmark.
 
-**Headline result:** mean AP@[.5:.95] of **0.791** on the held-out test split
-(95% CI [0.766, 0.812]), 95.6% F1 at IoU 0.5.
+**Headline result:** mean average precision at intersection-over-union thresholds 0.50 to 0.95 of **0.791** on the held-out test split
+(95% confidence interval [0.766, 0.812]), 95.6% F1 at intersection-over-union 0.5.
 
 **The finding that matters more.** Split the shortfall by cause and **63% of it is
 boundary placement on objects the model already found correctly**, against 37% for
@@ -99,7 +99,7 @@ percentile bootstrap over images.
 
 **Validation** (50 fields, 5,896 nuclei) — every parameter choice was made here.
 
-| Method | AP@[.5:.95] | 95% CI | F1@0.5 | mean IoU | splits | merges | count bias |
+| Method | Average precision (0.50–0.95) | 95% interval | F1 at 0.50 | mean intersection-over-union | splits | merges | count bias |
 |---|---|---|---|---|---|---|---|
 | Classical (Otsu → distance → watershed) | 0.555 | [0.515, 0.588] | 0.821 | 0.892 | 405 | 169 | −0.19% |
 | **Cellpose-SAM, stock parameters** | **0.807** | [0.789, 0.825] | 0.962 | 0.928 | 24 | 103 | −4.51% |
@@ -107,7 +107,7 @@ percentile bootstrap over images.
 
 **Test** (50 fields, 5,720 nuclei) — touched only after the above was settled.
 
-| Method | AP@[.5:.95] | 95% CI | F1@0.5 | mean IoU | splits | merges | count bias |
+| Method | Average precision (0.50–0.95) | 95% interval | F1 at 0.50 | mean intersection-over-union | splits | merges | count bias |
 |---|---|---|---|---|---|---|---|
 | Classical | 0.576 | [0.548, 0.600] | 0.858 | 0.886 | 364 | 197 | −0.42% |
 | **Cellpose-SAM, stock parameters** | **0.791** | [0.766, 0.812] | 0.956 | 0.926 | 16 | 114 | −4.32% |
@@ -132,7 +132,7 @@ overfitting: the test fields are slightly harder.
 **First, the accuracy answer, because it is the one the brief is really asking
 for: I could not move it.** Six interventions, each chosen by measurement, are
 documented in [what I tested and refuted](#what-i-tested-and-refuted). The best of
-them is +0.0021 AP against a bootstrap interval of ±0.018 — the noise is nine
+them is +0.0021 average precision against a bootstrap interval of ±0.018 — the noise is nine
 times the effect, and `evaluate.compare()` prints a warning saying so rather than
 letting it be quoted as a win. Test-time augmentation, parameter tuning, adaptive
 search, input rescaling, and local normalisation are all honestly negative on the
@@ -151,7 +151,7 @@ bit-identical output.** Measured by
 [`scripts/08_flowcache_benchmark.py`](scripts/08_flowcache_benchmark.py), saved
 to [`results/flowcache_benchmark.json`](results/flowcache_benchmark.json).
 
-Cellpose-SAM inference costs ~9 s per field on Apple Silicon MPS, which makes any
+Cellpose-SAM inference costs ~9 s per field on Apple Silicon Metal Performance Shaders, which makes any
 parameter search impractical — the 18-arm grid over 50 validation images is 900
 evaluations, **2.2 hours** at that rate. But the expensive part is only the
 network forward pass, which emits a flow field `dP` and a probability map
@@ -187,12 +187,12 @@ median-based figure is **~72×**, which is the one I would quote.
 ![Where the score is lost](figures/fig1_where_the_score_is_lost.png)
 
 The headline 0.807 is an average of ten numbers, and they are wildly unequal. At
-IoU 0.50 the score is 0.928; at 0.95 it is 0.309. The right panel converts that
+intersection-over-union 0.50 the score is 0.928; at 0.95 it is 0.309. The right panel converts that
 into shares of the total shortfall: **the two strictest thresholds cause 54% of
 the entire gap to a perfect score.**
 
 Splitting that shortfall by *cause* rather than by threshold needs more care than
-it first appears. The shortfall at IoU 0.50 is 0.072 — those are objects that fail
+it first appears. The shortfall at intersection-over-union 0.50 is 0.072 — those are objects that fail
 even the loosest test, i.e. genuine detection failures. It is tempting to divide
 that by the 1.93 total and call detection 4% of the problem, but that is a
 category error: it compares one threshold's shortfall against a ten-threshold
@@ -209,7 +209,7 @@ found correctly, and one third is detection. That is still the finding that
 redirects everything — just not by the factor of ten the naive arithmetic
 suggested.
 
-Mean IoU over matched objects is 0.928. For a median nucleus of 622 px that is
+Mean intersection-over-union over matched objects is 0.928. For a median nucleus of 622 px that is
 roughly **half a pixel** of average boundary displacement. So the question is what
 a threshold demanding sub-pixel agreement with a hand tracing is actually
 measuring.
@@ -288,10 +288,10 @@ a counterweight.
   sampling fix, and the reference it was measured against turns out not to exist.
 - **It does support** that the two outlines differ systematically at sub-pixel
   scale, and that the one well-posed measurement available favours the model's
-  boundary — so scores at IoU ≥ 0.90 are dominated by a sub-pixel placement
+  boundary — so scores at intersection-over-union ≥ 0.90 are dominated by a sub-pixel placement
   difference rather than by segmentation quality.
-- **Practical consequence, unchanged:** report F1@0.5 or AP@[.5:.75] on this
-  dataset, and treat AP at IoU ≥ 0.90 as a noise floor.
+- **Practical consequence, unchanged:** report F1 score at intersection-over-union 0.50 or average precision@[.5:.75] on this
+  dataset, and treat average precision at intersection-over-union ≥ 0.90 as a noise floor.
 - **It covers the easy population only** — matched objects above 150 px with
   adequate contrast, off the field edge: 4,502 of 5,896. It excludes exactly the
   small objects that dominate §2. §1 and §2 are separate findings.
@@ -302,9 +302,9 @@ a counterweight.
 
 ![What gets missed](figures/fig3_what_gets_missed.png)
 
-Recall at IoU 0.5 is 93.9% — 357 of 5,896 nuclei missed.
+Recall at intersection-over-union 0.5 is 93.9% — 357 of 5,896 nuclei missed.
 [`failures.py`](src/nucleiseg/failures.py) classifies each by mechanism, since a
-nucleus absorbed into a neighbour and one never detected cost the same in AP but
+nucleus absorbed into a neighbour and one never detected cost the same in average precision but
 need opposite fixes:
 
 | Mechanism | Count | |
@@ -374,7 +374,7 @@ dominant class: a bright punctum inside a nucleus is not a separate basin in the
 distance transform at all. Only ~23% of merges are even addressable that way, and
 each repair introduces two new boundaries on the least reliable part of the
 image — which then have to land within half a pixel to score at the thresholds
-where the AP is actually being lost.
+where the average precision is actually being lost.
 
 **What does reach them is resolution.** Refutation #9 found that running the
 network on a 2× upscaled input drops merges from 103 to 69, and halves the
@@ -382,7 +382,7 @@ genuine two-nuclei fusions from 24 to 12 — while leaving the small-object miss
 completely untouched (265 → 266). So the two failure modes in this section have
 *different* causes despite sharing a metric: the satellite class is an
 annotation-convention disagreement that rescaling does not touch, and the
-comparable class is substantially a resolution limit. The overall AP barely moved,
+comparable class is substantially a resolution limit. The overall average precision barely moved,
 because the merge gain was traded for more splits (24 → 36) and more false
 positives (91 → 120) — a trade only visible because splits and merges are counted
 separately.
@@ -397,7 +397,7 @@ place.
 
 ![Per-image spread](figures/fig5_per_image_scores.png)
 
-Per-image AP ranges 0.70–0.90 around a mean of 0.807, so any single-number
+Per-image average precision ranges 0.70–0.90 around a mean of 0.807, so any single-number
 comparison between two configurations on 50 images is fighting a standard
 deviation an order of magnitude larger than the effects being chased. That is why
 every headline number here carries a bootstrap interval, and why
@@ -416,7 +416,7 @@ close. Swept in *both* directions on 12 validation images, the default is the
 optimum:
 
 ```
-cellprob_threshold    AP       count bias   splits  merges
+cellprob_threshold    average precision       count bias   splits  merges
       -0.5          0.7930      -4.9%          3      26
       +0.0          0.8028      -5.1%          3      25   <- default, best
       +0.5          0.7838      -5.9%          3      24
@@ -425,7 +425,7 @@ cellprob_threshold    AP       count bias   splits  merges
 ```
 
 **2. The count bias is a post-processing artifact.** Refuted by the same sweep,
-and this is the informative part: `cellprob_threshold` swings AP by 13 points
+and this is the informative part: `cellprob_threshold` swings average precision by 13 points
 while the count bias stays pinned between −4.9% and −7.5%. It cannot be the
 mechanism. The deficit lives upstream of any threshold.
 
@@ -441,7 +441,7 @@ still building, and the full-validation numbers in
 **4. A bandit finds good parameters more cheaply than brute force.** Built UCB1,
 Thompson sampling, and LinUCB, then measured them against exhaustive enumeration
 of the same 24-arm grid over 8 images (192 evaluations) at a 60-pull budget.
-**Both bandits lost.** UCB1 missed the true optimum by 0.0034 AP, Thompson by
+**Both bandits lost.** UCB1 missed the true optimum by 0.0034 average precision, Thompson by
 0.0112 — and Thompson's declared best arm had been pulled *once*.
 Recorded in [`results/bandit_sweep_validation.json`](results/bandit_sweep_validation.json)
 as `found_optimum: false`.
@@ -451,7 +451,7 @@ to spend a limited evaluation budget wisely, and FlowCache had already made the
 entire grid enumerable in 1.6 minutes. There was no budget problem left by the
 time I finished building the thing meant to solve it.
 
-The second is the one worth knowing. Per-image AP has a standard deviation near
+The second is the one worth knowing. Per-image average precision has a standard deviation near
 0.05, while the arms differ by 0.003–0.01. These bandits sample *(arm, random
 image)* pairs, so at one to three pulls each they are mostly measuring which image
 came up. The fix is a paired design — score every arm on the *same* images and
@@ -465,11 +465,11 @@ the repo and it contributed one negative result.
 **5. Test-time augmentation fixes the merges.** It was the most direct remaining
 shot: averaging over flipped tiles reduces variance in the flow field. The
 prediction was registered in
-[`07_tta_comparison.py`](scripts/07_tta_comparison.py) *before* running it — AP
-rises, the gain concentrates at IoU ≥ 0.85, and the merge count holds, because a
+[`07_tta_comparison.py`](scripts/07_tta_comparison.py) *before* running it — average precision
+rises, the gain concentrates at intersection-over-union ≥ 0.85, and the merge count holds, because a
 merge is a *bias* and averaging eight flips of the same biased model reproduces it
-more confidently. All three held: +0.0023 AP (intervals overlapping), gain at
-strict thresholds +0.0036 against +0.0018 at loose ones, merges 103 → 99. So TTA
+more confidently. All three held: +0.0023 average precision (intervals overlapping), gain at
+strict thresholds +0.0036 against +0.0018 at loose ones, merges 103 → 99. So test-time augmentation
 is not a fix. Note the conclusion I drew from it — that merges are an *unreachable*
 bias — was too strong, and refutation #9 below overturns it.
 
@@ -515,7 +515,7 @@ merges                   103           69      <- predicted no change
   of which real fusions   24           12
 splits                    24           36
 false positives           91          120
-AP                    0.8069       0.8090      (intervals overlap)
+average precision                    0.8069       0.8090      (intervals overlap)
 ```
 
 **Both main predictions broke**, and I had them backwards. Small objects did not
@@ -542,7 +542,7 @@ bright nuclei compresses everything dimmer toward background.
 `tile_norm_blocksize=128` normalises within local tiles instead, judging each
 nucleus against its own neighbourhood.
 
-| | AP | F1@0.5 | faint objects found | false positives | merges |
+| | average precision | F1 score at intersection-over-union 0.50 | faint objects found | false positives | merges |
 |---|---|---|---|---|---|
 | default | 0.8069 | 0.9620 | 85.6% | 91 | 103 |
 | local normalisation | 0.8074 | **0.9632** | 85.8% | 91 | 102 |
@@ -591,7 +591,7 @@ nuclei can be erased, and the residual contains background plus the ~350 misses 
 in which those misses are the brightest structures present. So
 [`smallobj.py`](src/nucleiseg/smallobj.py) erases the first pass, runs
 Laplacian-of-Gaussian blob detection at the measured miss scale (3–10 px, where
-LoG is scale-selective by construction), and gates candidates on the ratio of
+Laplacian-of-Gaussian is scale-selective by construction), and gates candidates on the ratio of
 edge-ring gradient energy to interior energy — a real nucleus has a coherent
 boundary, a shot-noise spike does not. That gate is adapted from the
 [HFEF](https://pmc.ncbi.nlm.nih.gov/articles/PMC13066857/) idea of using
@@ -604,8 +604,8 @@ The detector works. It is just not selective enough to pay for itself:
 | recall, objects < 50 px | 24.5% | **32.2%** |
 | recall, objects ≥ 50 px | 98.3% | 98.4% |
 | false positives | 91 | **217** |
-| F1@0.5 | 0.9620 | 0.9351 |
-| AP@[.5:.95] | 0.8069 | 0.7719 |
+| F1 score at intersection-over-union 0.50 | 0.9620 | 0.9351 |
+| average precision at intersection-over-union thresholds 0.50 to 0.95 | 0.8069 | 0.7719 |
 
 155 objects added, of which roughly 29 are real. Sweeping the three gates over 18
 operating points, **second-pass precision peaks at 28% and then plateaus** —
@@ -651,19 +651,19 @@ a random ranker, a 16× lift:
 against the 28% ceiling of hand-tuned gates. The feature importances are
 themselves a result: detector confidence (+0.206), **signal-to-noise (+0.183)** and
 local crowding (+0.178) dominate, with shape and edge cues an order of magnitude
-behind. SNR ranking second is what #1–3, #9, #10 and #11 all implied — these
+behind. signal-to-noise ratio ranking second is what #1–3, #9, #10 and #11 all implied — these
 objects are noise-limited, and the model agrees.
 
-**And it still loses on the metric.** F1@0.5 0.9620 → 0.9589, AP 0.8069 → 0.7915.
+**And it still loses on the metric.** F1 score at intersection-over-union 0.50 0.9620 → 0.9589, average precision 0.8069 → 0.7915.
 
 The reason is not detection. Of the accepted candidates that sit on a genuinely
-missed nucleus, only 26% matched at IoU 0.5, with median IoU 0.366 — the masks
+missed nucleus, only 26% matched at intersection-over-union 0.5, with median intersection-over-union 0.366 — the masks
 were 41% of true area, because a half-height cut on a faint blurred object lands
 well inside the annotation. Sweeping that cut from 0.50 to 0.20 roughly triples the
 hit rate (13% → 40%) and then plateaus, which recovered two-thirds of the loss but
 not all of it.
 
-**Why it plateaus is the point.** For a round object, IoU ≥ 0.5 requires the two
+**Why it plateaus is the point.** For a round object, intersection-over-union ≥ 0.5 requires the two
 radii to agree within 17%:
 
 | object area | radius | permitted radial error |
@@ -672,21 +672,21 @@ radii to agree within 17%:
 | 120 px | 6.2 px | 1.06 px |
 | 622 px (a typical nucleus) | 14.1 px | 2.42 px |
 
-**Matching a 16 px object at IoU 0.5 demands better than half-pixel outline
+**Matching a 16 px object at intersection-over-union 0.5 demands better than half-pixel outline
 accuracy** — the same bar §1 showed is beyond the human annotator on nuclei forty
 times larger. So the second pass finds these objects and cannot be credited for
 them, and no amount of classifier improvement changes that: the ceiling is
 geometric, not statistical.
 
 That is the same finding as §1 arriving from the opposite direction. §1: at strict
-IoU on large objects, the metric measures sub-pixel convention. §12: at IoU 0.5 on
+intersection-over-union on large objects, the metric measures sub-pixel convention. §12: at intersection-over-union 0.5 on
 small objects, it measures sub-pixel convention too, because the object is small
 enough that 0.5 *is* a strict threshold. **The metric's difficulty is set by
 object size, not by segmentation quality**, which is why every intervention aimed
 at the small population has failed and will continue to.
 
 The honest recommendation for a dataset with this size distribution is a
-size-stratified metric: score the ≥100 px population at IoU 0.5 and report the
+size-stratified metric: score the ≥100 px population at intersection-over-union 0.5 and report the
 small population as detection counts, since outline agreement is not measurable
 there.
 
@@ -759,25 +759,25 @@ hazard in any per-image metric.
 Decided once, in [`metrics.py`](src/nucleiseg/metrics.py), and held fixed so
 results stay comparable.
 
-- **Headline:** mean AP over IoU 0.50:0.05:0.95, the DSB2018 convention. Note
-  this "AP" is `TP/(TP+FP+FN)` per threshold — a Jaccard-style ratio over
+- **Headline:** mean average precision over intersection-over-union 0.50:0.05:0.95, the the 2018 Data Science Bowl convention. Note
+  this "average precision" is `true positives / (true positives + false positives + false negatives)` per threshold — a Jaccard-style ratio over
   *objects*, **not** area under a precision-recall curve.
-- **Matching:** greedy by descending IoU, provably equivalent to Hungarian at
-  thresholds ≥ 0.5, since a prediction cannot exceed IoU 0.5 with two disjoint
+- **Matching:** greedy by descending intersection-over-union, provably equivalent to Hungarian at
+  thresholds ≥ 0.5, since a prediction cannot exceed intersection-over-union 0.5 with two disjoint
   ground-truth objects. A randomized test asserts the equivalence.
-- **Splits and merges counted separately** from AP and from any count statistic.
-  They cost nearly the same in AP, need opposite fixes, and cancel exactly in the
+- **Splits and merges counted separately** from average precision and from any count statistic.
+  They cost nearly the same in average precision, need opposite fixes, and cancel exactly in the
   object count — the classical pipeline's −0.19% count bias over 574 topology
   errors is that hazard made concrete.
 - **Empty ground truth:** predict nothing → 1.0, predict anything → 0.0.
   Aggregates are reported both with and without the empty fields, since the
-  convention is worth ~0.004 AP on validation.
+  convention is worth ~0.004 average precision on validation.
 - **Both aggregations:** macro (mean over images) and micro (pooled counts), which
   answer different questions and each hide something.
-- **Bootstrap 95% CI on every headline number**, and `compare()` warns explicitly
+- **Bootstrap 95% confidence interval on every headline number**, and `compare()` warns explicitly
   when two intervals overlap.
 
-F1@0.5 is reported alongside as the number legible to a biologist counting cells,
+F1 score at intersection-over-union 0.50 is reported alongside as the number legible to a biologist counting cells,
 and given §1, it is arguably the more honest headline for this dataset.
 
 ## What I'd try next
@@ -791,7 +791,7 @@ satellite merges need a biologist's read: micronuclei, mitotic figures, apoptoti
 fragments, and debris are all plausible, and BBBC039's annotation protocol does
 not say. If they are real nuclei, `min_size` and the flow-field's treatment of
 puncta are the targets. If they are annotation artifacts, the honest move is to
-report AP with and without objects below a stated size floor — which would raise
+report average precision with and without objects below a stated size floor — which would raise
 recall from 93.9% substantially at zero modelling cost.
 
 **2. Get a second annotator on a subset.** §1's ceiling argument is currently
@@ -801,17 +801,17 @@ nucleus ends. Re-tracing even 20 nuclei twice would give a real inter-annotator
 agreement number and convert the ceiling from an inference into a measurement.
 
 **3. Fine-tune on the 20-100 px band.** Skipped here for a practical reason first:
-MPS training time was unmeasured against a hard deadline, and a timeboxed probe
+Metal Performance Shaders training time was unmeasured against a hard deadline, and a timeboxed probe
 cannot distinguish "will not converge" from "needs another fifteen minutes," so it
 produces sunk cost rather than a decision.
 
 There is also a reason to be careful about how it is judged. Given §1, a fine-tune
 would gain partly by learning this annotator's systematic tightness — improving the
 metric while making the segmentation no better. That makes it a useful *test* of
-the ceiling claim as well as an improvement: if the gain concentrates at IoU ≥ 0.90
+the ceiling claim as well as an improvement: if the gain concentrates at intersection-over-union ≥ 0.90
 and the fine-tuned boundaries move away from the image's own edge, the ceiling
 argument is confirmed directly. Target the 20-100 px objects, which are faint but
-real, and judge that band on detection counts rather than IoU — otherwise the
+real, and judge that band on detection counts rather than intersection-over-union — otherwise the
 geometry in §12 will hide whatever it achieves.
 
 **4. A genuinely different backbone.** `cpdino` swaps SAM for DINOv3 and is
@@ -824,17 +824,17 @@ cheaply.
 
 **5. Per-object confidence, for a real precision-recall curve.** Mean `cellprob`
 over each predicted object is a serviceable confidence score, which would make a
-genuine detection AP computable rather than the count-ratio used here. (The
-classical pipeline's watershed produces no such score, which is why the DSB
+genuine detection average precision computable rather than the count-ratio used here. (The
+classical pipeline's watershed produces no such score, which is why the Data Science Bowl
 convention was chosen for comparability.)
 
 **Fine-tune Cellpose on the 20–100 px band, and score it size-stratified.** §12
 established that detection of the small population is solvable — a trained
 classifier reaches 78% precision — and that the obstacle is outline accuracy at
-IoU 0.5, which is geometric. A fine-tune is the one remaining lever that could
+intersection-over-union 0.5, which is geometric. A fine-tune is the one remaining lever that could
 improve *outlines* rather than detection, and the 20–100 px objects are the right
 target because they are faint but real. Judge it on detection counts for that band
-and on IoU only above ~100 px, or the metric will hide whatever it achieves.
+and on intersection-over-union only above ~100 px, or the metric will hide whatever it achieves.
 
 Explicitly **not** worth doing, having been measured: further post-processing
 parameter search (#1–3), bandit-based search on this grid (#4),
@@ -855,12 +855,12 @@ an obvious next step.
 ```
 src/nucleiseg/
   data.py         ground-truth decoding, split loading, dataset stats
-  metrics.py      IoU matching, DSB AP sweep, splits/merges, bootstrap CIs
+  metrics.py      intersection-over-union matching, Data Science Bowl average precision sweep, splits/merges, bootstrap CIs
   segmenters.py   unified interface + FlowCache (the 72x optimization)
   baseline.py     classical pipeline: normalize -> Otsu -> EDT -> watershed
   boundary.py     half-maximum edge check -- the annotation-ceiling measurement
   failures.py     per-object error inventory: missed objects, merge composition
-  smallobj.py     residual-pass LoG detector with an edge-coherence gate
+  smallobj.py     residual-pass Laplacian-of-Gaussian detector with an edge-coherence gate
   candidates.py   eleven features per candidate, for the trained classifier
   bandits.py      UCB1, Thompson sampling, LinUCB
   features.py     three label-free per-image descriptors
@@ -872,7 +872,7 @@ scripts/
   02_bandit_sweep.py        bandits vs exhaustive enumeration
   05_failure_analysis.py    error inventory + annotation ceiling
   06_figures.py             every figure, rendered from results/
-  07_tta_comparison.py      TTA before/after with a registered prediction
+  07_tta_comparison.py      test-time augmentation before/after with a registered prediction
   09_diameter.py            input rescaling; both predictions broke
   10_input_level.py         local normalization, and combined with rescaling
   11_residual_pass.py       second-pass small-object detector on the residual
@@ -898,7 +898,7 @@ RESOURCES.md      annotated reading list, marked verified vs. not
 
   So an unknown but non-zero number of the 200 fields here — possibly including
   test-split fields — may have been seen *with their labels* during training.
-  BBBC039 is never named in the paper; the exposure route is the DSB2018 overlap.
+  BBBC039 is never named in the paper; the exposure route is the the 2018 Data Science Bowl overlap.
   I did not quantify it, which would mean matching BBBC039 fields against the
   BBBC038 image set. **Anyone comparing this 0.791 against a number from a model
   that never saw BBBC038 is not making a fair comparison.**
@@ -911,19 +911,19 @@ RESOURCES.md      annotated reading list, marked verified vs. not
 - **The test split shares imaging batches with training** (refutation #8), so
   0.791 measures across-field generalization within one experiment, not
   across-instrument or across-protocol transfer.
-- **AP at IoU ≥ 0.90 is a noise floor on this dataset**, per §1, and comparisons
+- **average precision at intersection-over-union ≥ 0.90 is a noise floor on this dataset**, per §1, and comparisons
   in that range should not be trusted.
-- **`n = 50` per split.** A one-point AP difference is inside the bootstrap
+- **`n = 50` per split.** A one-point average precision difference is inside the bootstrap
   interval; every claim here that survives does so with its interval attached.
 - **The satellite/comparable merge split uses a 0.25 area-ratio heuristic.** The
   60/23/17 breakdown is robust in direction, but individual borderline cases can
   flip, which is why the figure labels each panel with the actual object areas
   rather than asking the reader to trust the class.
 - **The annotation-ceiling result covers 4,502 of 5,896 nuclei** — those matched
-  at IoU 0.5, above 150 px, not touching the field edge, and with enough local
+  at intersection-over-union 0.5, above 150 px, not touching the field edge, and with enough local
   contrast for the normalization to be stable. It says nothing about the small
   objects in §2, which are excluded by the area cut precisely because their
   boundary statistics are unreliable.
-- **Developed on Apple Silicon, MPS backend, no CUDA.** Timings are
+- **Developed on Apple Silicon, Metal Performance Shaders backend, no CUDA.** Timings are
   machine-specific; the ~72× ratio should hold in shape but not in absolute
   numbers.
