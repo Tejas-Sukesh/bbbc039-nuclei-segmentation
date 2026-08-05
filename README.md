@@ -33,6 +33,9 @@ plus a gradient-boosted classifier trained on the held-out training split, which
 lifts small-object detection precision from 28% to 78% (§12). Twelve hypotheses
 were tested and refuted along the way, each with numbers.
 
+**Short on time?** [SUMMARY.md](SUMMARY.md) is the whole project in one page, in
+plain language, with no jargon to decode.
+
 Everything below was measured on this machine and is committed alongside the
 numbers in [`results/`](results/), so each figure quoted can be checked against
 the file that produced it.
