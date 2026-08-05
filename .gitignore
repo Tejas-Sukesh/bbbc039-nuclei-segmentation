@@ -38,3 +38,5 @@ data/flow_cache/
 
 # Exploratory work outside the submission
 experiments/
+
+!results/candidate_classifier.pkl

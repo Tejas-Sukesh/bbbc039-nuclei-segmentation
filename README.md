@@ -31,7 +31,7 @@ the file that produced it.
 
 - [Quickstart](#quickstart) · [Results](#results) · [The optimization](#the-one-thing-optimized-deliberately)
 - [Where it fails](#where-it-fails) — the main section
-- [What I tested and refuted](#what-i-tested-and-refuted) — eleven hypotheses, with numbers
+- [What I tested and refuted](#what-i-tested-and-refuted) — twelve hypotheses, with numbers
 - [Approach](#approach) · [The dataset trap](#the-ground-truth-is-not-what-it-looks-like) · [Metric conventions](#metric-conventions)
 - [What I'd try next](#what-id-try-next) · [Limitations](#limitations)
 
@@ -77,6 +77,7 @@ python scripts/07_tta_comparison.py --split test   # the held-out number
 python scripts/09_diameter.py --diameters 15       # input rescaling
 python scripts/10_input_level.py                   # + local normalization
 python scripts/11_residual_pass.py                 # second-pass small-object detector
+python scripts/12_train_candidate_classifier.py    # trains the classifier (uses training split)
 ```
 
 Only step 1 is slow (~35 min for all 200 fields). Everything after it reads the
@@ -617,6 +618,71 @@ to recover.** A classical method cannot find them because the information is not
 in the image — which also bounds what fine-tuning could achieve on that
 sub-population, though not on the 20–100 px band where objects are faint but real.
 
+**12. A trained classifier can make the second pass pay for itself.** The one
+model trained from scratch here, and the result that unifies the two halves of
+this writeup.
+
+The residual detector (#11) proposes candidates at 28% precision, and hand-tuning
+its gates cannot do better — no single threshold on any one cue separates the
+classes. So: propose generously, describe each candidate with eleven features
+computed from the image and the first-pass prediction only, and train a
+gradient-boosted tree to weigh them jointly.
+[`candidates.py`](src/nucleiseg/candidates.py) builds the features,
+[`12_train_candidate_classifier.py`](scripts/12_train_candidate_classifier.py)
+trains on the **100 training images** — genuinely untouched by every earlier
+decision in this project — and evaluates on validation.
+
+**The detection problem is solved.** Average precision **0.760** against 0.047 for
+a random ranker, a 16× lift:
+
+| classifier cut | kept | correct | precision | recall |
+|---|---|---|---|---|
+| 0.30 | 207 | 139 | **67%** | 76% |
+| 0.70 | 123 | 96 | **78%** | 53% |
+| 0.90 | 46 | 39 | **85%** | 21% |
+
+against the 28% ceiling of hand-tuned gates. The feature importances are
+themselves a result: detector confidence (+0.206), **signal-to-noise (+0.183)** and
+local crowding (+0.178) dominate, with shape and edge cues an order of magnitude
+behind. SNR ranking second is what #1–3, #9, #10 and #11 all implied — these
+objects are noise-limited, and the model agrees.
+
+**And it still loses on the metric.** F1@0.5 0.9620 → 0.9589, AP 0.8069 → 0.7915.
+
+The reason is not detection. Of the accepted candidates that sit on a genuinely
+missed nucleus, only 26% matched at IoU 0.5, with median IoU 0.366 — the masks
+were 41% of true area, because a half-height cut on a faint blurred object lands
+well inside the annotation. Sweeping that cut from 0.50 to 0.20 roughly triples the
+hit rate (13% → 40%) and then plateaus, which recovered two-thirds of the loss but
+not all of it.
+
+**Why it plateaus is the point.** For a round object, IoU ≥ 0.5 requires the two
+radii to agree within 17%:
+
+| object area | radius | permitted radial error |
+|---|---|---|
+| 16 px (the median miss) | 2.3 px | **0.39 px** |
+| 120 px | 6.2 px | 1.06 px |
+| 622 px (a typical nucleus) | 14.1 px | 2.42 px |
+
+**Matching a 16 px object at IoU 0.5 demands better than half-pixel outline
+accuracy** — the same bar §1 showed is beyond the human annotator on nuclei forty
+times larger. So the second pass finds these objects and cannot be credited for
+them, and no amount of classifier improvement changes that: the ceiling is
+geometric, not statistical.
+
+That is the same finding as §1 arriving from the opposite direction. §1: at strict
+IoU on large objects, the metric measures sub-pixel convention. §12: at IoU 0.5 on
+small objects, it measures sub-pixel convention too, because the object is small
+enough that 0.5 *is* a strict threshold. **The metric's difficulty is set by
+object size, not by segmentation quality**, which is why every intervention aimed
+at the small population has failed and will continue to.
+
+The honest recommendation for a dataset with this size distribution is a
+size-stratified metric: score the ≥100 px population at IoU 0.5 and report the
+small population as detection counts, since outline agreement is not measurable
+there.
+
 ## Approach
 
 Cellpose-SAM as the segmenter, a from-scratch classical pipeline as the
@@ -775,6 +841,7 @@ src/nucleiseg/
   boundary.py     half-maximum edge check -- the annotation-ceiling measurement
   failures.py     per-object error inventory: missed objects, merge composition
   smallobj.py     residual-pass LoG detector with an edge-coherence gate
+  candidates.py   eleven features per candidate, for the trained classifier
   bandits.py      UCB1, Thompson sampling, LinUCB
   features.py     three label-free per-image descriptors
   grids.py        shared parameter space and arm definitions
@@ -791,6 +858,7 @@ scripts/
   09_diameter.py            input rescaling; both predictions broke
   10_input_level.py         local normalization, and combined with rescaling
   11_residual_pass.py       second-pass small-object detector on the residual
+  12_train_candidate_classifier.py   trains the candidate classifier
   08_flowcache_benchmark.py the optimization, measured and verified
 tests/            37 tests: metrics, matching equivalence, bandits
 results/          summaries and per-image rows for every number quoted here
