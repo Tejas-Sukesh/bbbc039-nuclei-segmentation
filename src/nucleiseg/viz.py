@@ -369,9 +369,11 @@ def annotation_ceiling(fits_csv: Path, out: Path, summary: dict | None = None) -
     ax2.set_ylim(0, 1)
     ax2.yaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
     ax2.set_ylabel(f"share of {n_img} fields", color=C_INK_SOFT)
+    # Pad clears the "not evidence" caption sitting just above the left bar;
+    # without it the second title line lands on top of that caption.
     ax2.set_title("Only the gradient measure is well-posed\n"
                   "half-maximum needs a plateau these nuclei do not have",
-                  fontsize=11, color=C_INK, loc="left")
+                  fontsize=11, color=C_INK, loc="left", pad=20)
     ax2.annotate("not evidence", xy=(0, 1.0), xytext=(0, 6),
                  textcoords="offset points", ha="center", fontsize=8.5,
                  color=C_INK_SOFT, style="italic")

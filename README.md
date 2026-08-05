@@ -31,7 +31,7 @@ the file that produced it.
 
 - [Quickstart](#quickstart) · [Results](#results) · [The optimization](#the-one-thing-optimized-deliberately)
 - [Where it fails](#where-it-fails) — the main section
-- [What I tested and refuted](#what-i-tested-and-refuted) — ten hypotheses, with numbers
+- [What I tested and refuted](#what-i-tested-and-refuted) — eleven hypotheses, with numbers
 - [Approach](#approach) · [The dataset trap](#the-ground-truth-is-not-what-it-looks-like) · [Metric conventions](#metric-conventions)
 - [What I'd try next](#what-id-try-next) · [Limitations](#limitations)
 
@@ -76,6 +76,7 @@ python scripts/07_tta_comparison.py --split test   # the held-out number
 
 python scripts/09_diameter.py --diameters 15       # input rescaling
 python scripts/10_input_level.py                   # + local normalization
+python scripts/11_residual_pass.py                 # second-pass small-object detector
 ```
 
 Only step 1 is slow (~35 min for all 200 fields). Everything after it reads the
@@ -571,6 +572,51 @@ the correlation and the fact that it is not built into the targets. The causal
 story is a hypothesis, and testing it would need something like ablating contrast
 at fixed geometry.
 
+**11. The small faint objects can be recovered by a targeted second pass.** The
+one intervention here that is *built* rather than tuned, and the most informative
+failure.
+
+Every earlier attempt failed the same way: lowering a threshold to admit small
+faint objects admits noise *everywhere*. But that trade is only forced if the
+second look is global. After the first pass, the ~5,600 confidently detected
+nuclei can be erased, and the residual contains background plus the ~350 misses —
+in which those misses are the brightest structures present. So
+[`smallobj.py`](src/nucleiseg/smallobj.py) erases the first pass, runs
+Laplacian-of-Gaussian blob detection at the measured miss scale (3–10 px, where
+LoG is scale-selective by construction), and gates candidates on the ratio of
+edge-ring gradient energy to interior energy — a real nucleus has a coherent
+boundary, a shot-noise spike does not. That gate is adapted from the
+[HFEF](https://pmc.ncbi.nlm.nih.gov/articles/PMC13066857/) idea of using
+high-frequency energy as a segmentation cue, minus the training.
+
+The detector works. It is just not selective enough to pay for itself:
+
+| | before | after |
+|---|---|---|
+| recall, objects < 50 px | 24.5% | **32.2%** |
+| recall, objects ≥ 50 px | 98.3% | 98.4% |
+| false positives | 91 | **217** |
+| F1@0.5 | 0.9620 | 0.9351 |
+| AP@[.5:.95] | 0.8069 | 0.7719 |
+
+155 objects added, of which roughly 29 are real. Sweeping the three gates over 18
+operating points, **second-pass precision peaks at 28% and then plateaus** —
+tightening further loses true positives without gaining precision, so no setting
+is net-positive.
+
+**Why this is the useful negative.** This method had every advantage: it knew
+*where* to look (only where the first pass found nothing), it had a size prior
+from the measured miss distribution, and it had a shape prior via the edge-
+coherence gate. It still cannot separate the missed objects from background
+structure. Together with #1–3 (global thresholds), #9 (resolution) and #10
+(contrast), that is four independent mechanisms failing on the same population.
+
+The remaining explanation is the one the pixels already suggested in §2: below
+~15 px these annotations sit on visually empty background. **There is no signal
+to recover.** A classical method cannot find them because the information is not
+in the image — which also bounds what fine-tuning could achieve on that
+sub-population, though not on the 20–100 px band where objects are faint but real.
+
 ## Approach
 
 Cellpose-SAM as the segmenter, a from-scratch classical pipeline as the
@@ -728,6 +774,7 @@ src/nucleiseg/
   baseline.py     classical pipeline: normalize -> Otsu -> EDT -> watershed
   boundary.py     half-maximum edge check -- the annotation-ceiling measurement
   failures.py     per-object error inventory: missed objects, merge composition
+  smallobj.py     residual-pass LoG detector with an edge-coherence gate
   bandits.py      UCB1, Thompson sampling, LinUCB
   features.py     three label-free per-image descriptors
   grids.py        shared parameter space and arm definitions
@@ -743,6 +790,7 @@ scripts/
   07_tta_comparison.py      TTA before/after with a registered prediction
   09_diameter.py            input rescaling; both predictions broke
   10_input_level.py         local normalization, and combined with rescaling
+  11_residual_pass.py       second-pass small-object detector on the residual
   08_flowcache_benchmark.py the optimization, measured and verified
 tests/            37 tests: metrics, matching equivalence, bandits
 results/          summaries and per-image rows for every number quoted here
