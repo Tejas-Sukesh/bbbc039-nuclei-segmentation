@@ -21,6 +21,13 @@ artifact of how boundary pixels were sampled; the second leaned on a half-maximu
 statistic whose reference turns out not to exist for these objects — nuclei have no
 intensity plateau. §1 documents both, and what survives them.
 
+**What I built and trained.** A correct decoder for the ground truth (§the dataset
+trap), a from-scratch classical pipeline, a 72× evaluation cache, and a
+**two-stage detector for the objects Cellpose misses** — a residual proposal step
+plus a gradient-boosted classifier trained on the held-out training split, which
+lifts small-object detection precision from 28% to 78% (§12). Twelve hypotheses
+were tested and refuted along the way, each with numbers.
+
 Everything below was measured on this machine and is committed alongside the
 numbers in [`results/`](results/), so each figure quoted can be checked against
 the file that produced it.
@@ -818,9 +825,19 @@ genuine detection AP computable rather than the count-ratio used here. (The
 classical pipeline's watershed produces no such score, which is why the DSB
 convention was chosen for comparability.)
 
+**Fine-tune Cellpose on the 20–100 px band, and score it size-stratified.** §12
+established that detection of the small population is solvable — a trained
+classifier reaches 78% precision — and that the obstacle is outline accuracy at
+IoU 0.5, which is geometric. A fine-tune is the one remaining lever that could
+improve *outlines* rather than detection, and the 20–100 px objects are the right
+target because they are faint but real. Judge it on detection counts for that band
+and on IoU only above ~100 px, or the metric will hide whatever it achieves.
+
 Explicitly **not** worth doing, having been measured: further post-processing
 parameter search (#1–3), bandit-based search on this grid (#4),
-distance-transform merge repair (§3), and local contrast normalisation (#10).
+distance-transform merge repair (§3), local contrast normalisation (#10), and any
+further tuning of the small-object detector's gates (#11, #12 — the ceiling is
+geometric, not statistical).
 
 One genuinely open lead, from #9: **rescaling reaches merges.** 2× halved the
 genuine two-nuclei fusions, and the gain was cancelled by more splits and false
